@@ -30,12 +30,18 @@ impl SystemSettings {
     }
 
     pub fn sanitize(&mut self) {
+        self.sanitize_with_max_font(Self::DEFAULT_MAX_FONT_IDX);
+    }
+
+    pub fn sanitize_with_max_font(&mut self, max_font: u8) {
         self.sleep_timeout = self.sleep_timeout.min(120);
         self.ghost_clear_every = self.ghost_clear_every.clamp(1, 50);
-        let max_font = crate::fonts::max_size_idx();
         self.book_font_size_idx = self.book_font_size_idx.min(max_font);
         self.ui_font_size_idx = self.ui_font_size_idx.min(max_font);
     }
+
+    // reasonable default; distros override via sanitize_with_max_font
+    const DEFAULT_MAX_FONT_IDX: u8 = 4;
 }
 
 pub const WIFI_SSID_CAP: usize = 32;

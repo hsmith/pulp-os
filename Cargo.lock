@@ -1286,13 +1286,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "pulp-os"
+name = "pulp-kernel"
 version = "0.1.0"
 dependencies = [
  "critical-section",
  "embassy-executor",
  "embassy-futures",
- "embassy-net",
  "embassy-sync 0.7.2",
  "embassy-time",
  "embedded-graphics",
@@ -1300,8 +1299,26 @@ dependencies = [
  "embedded-hal 1.0.0",
  "embedded-hal-async",
  "embedded-hal-bus",
- "embedded-io-async 0.7.0",
  "embedded-sdmmc",
+ "esp-alloc",
+ "esp-hal",
+ "log",
+ "nb 1.1.0",
+ "smol-epub",
+ "static_cell",
+]
+
+[[package]]
+name = "pulp-os"
+version = "0.1.0"
+dependencies = [
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-net",
+ "embassy-time",
+ "embedded-graphics",
+ "embedded-graphics-core",
+ "embedded-io-async 0.7.0",
  "esp-alloc",
  "esp-backtrace",
  "esp-bootloader-esp-idf",
@@ -1311,7 +1328,7 @@ dependencies = [
  "esp-rtos",
  "fontdue",
  "log",
- "nb 1.1.0",
+ "pulp-kernel",
  "smol-epub",
  "static_cell",
 ]

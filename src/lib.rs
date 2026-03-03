@@ -4,9 +4,12 @@
 
 extern crate alloc;
 
+// kernel crate re-exports -- keeps crate::board, crate::drivers,
+// crate::kernel paths working in app code without import changes
+pub use pulp_kernel::board;
+pub use pulp_kernel::drivers;
+pub use pulp_kernel::kernel;
+
 pub mod apps;
-pub mod board;
-pub mod drivers;
 pub mod fonts;
-pub mod kernel;
 pub mod ui;

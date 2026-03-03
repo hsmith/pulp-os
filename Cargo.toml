@@ -1,5 +1,24 @@
 [workspace]
-members = ["."]
+members = [".", "kernel"]
+
+[workspace.dependencies]
+esp-hal  = { version = "1.0.0", features = ["esp32c3", "log-04", "unstable"] }
+embassy-executor = "0.9"
+embassy-time     = "0.5"
+embassy-futures  = "0.1"
+embassy-sync     = "0.7"
+embedded-hal       = "1.0.0"
+embedded-hal-async = "1.0.0"
+embedded-hal-bus   = "0.3.0"
+embedded-graphics-core = "0.4.1"
+embedded-graphics      = "0.8.2"
+embedded-sdmmc = { path = "../embedded-sdmmc-rs", features = ["async"] }
+smol-epub      = { path = "../smol-epub", features = ["async"] }
+critical-section = "1.2.0"
+static_cell      = "2.1.1"
+nb  = "1.1.0"
+log = "0.4.27"
+esp-alloc = { version = "0.9.0", features = ["internal-heap-stats"] }
 
 [package]
 edition      = "2024"
@@ -12,16 +31,22 @@ name = "pulp-os"
 path = "./src/bin/main.rs"
 
 [dependencies]
-esp-hal  = { version = "1.0.0", features = ["esp32c3", "log-04", "unstable"] }
+pulp-kernel = { path = "kernel" }
+
+esp-hal.workspace              = true
+embassy-executor.workspace     = true
+embassy-time.workspace         = true
+embassy-futures.workspace      = true
+embedded-graphics-core.workspace = true
+embedded-graphics.workspace    = true
+static_cell.workspace          = true
+log.workspace                  = true
+esp-alloc.workspace            = true
+smol-epub.workspace            = true
+
 esp-rtos = { version = "0.2.0", features = ["embassy", "esp32c3", "esp-radio", "log-04"] }
 
-# versions must match what esp-rtos 0.2.0 resolves internally
-embassy-executor = "0.9"
-embassy-time     = "0.5"
-embassy-futures  = "0.1"
-embassy-sync     = "0.7"
-
-# wifi / networking
+# wifi / networking (used by apps/upload.rs)
 esp-radio = { version = "0.17", default-features = false, features = [
   "esp32c3",
   "wifi",
@@ -32,29 +57,13 @@ embassy-net       = { version = "0.8", features = ["dhcpv4", "medium-ethernet", 
 embedded-io-async = "0.7"
 
 esp-bootloader-esp-idf = { version = "0.4.0", features = ["esp32c3", "log-04"] }
-log                    = "0.4.27"
 
-esp-alloc = { version = "0.9.0", features = ["internal-heap-stats"] }
 esp-backtrace = { version = "0.18.1", features = [
   "esp32c3",
   "panic-handler",
   "println",
 ] }
 esp-println = { version = "0.16.1", features = ["esp32c3", "log-04"] }
-
-critical-section = "1.2.0"
-static_cell      = "2.1.1"
-embedded-hal = "1.0.0"
-embedded-hal-async = "1.0.0"
-embedded-hal-bus = { version = "0.3.0"  }
-nb = "1.1.0"
-
-embedded-graphics-core = "0.4.1"
-embedded-graphics = "0.8.2"
-# FAT filesystem over SD/SPI (local fork with async volume manager)
-embedded-sdmmc = { path = "../embedded-sdmmc-rs", features = ["async"] }
-smol-epub = { path = "../smol-epub", features = ["async"] }
-
 
 [build-dependencies]
 fontdue = "0.9"
