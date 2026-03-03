@@ -579,7 +579,7 @@ where
                 return Err("invalid filename");
             }
 
-            // Warn if sanitisation changed the name — two different
+            // warn if sanitisation changed the name, two different
             // original names can map to the same 8.3 name, causing
             // the second upload to silently overwrite the first.
             if raw_name != &name_buf[..name_len as usize] {

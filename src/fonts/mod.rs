@@ -2,7 +2,7 @@
 // TTFs rasterised by build.rs via fontdue into 1-bit tables in flash
 // zero heap, zero parsing at runtime
 //
-// Five size tiers: 0=XSmall  1=Small  2=Medium  3=Large  4=XLarge
+// five size tiers: 0=XSmall  1=Small  2=Medium  3=Large  4=XLarge
 
 pub mod bitmap;
 
@@ -14,15 +14,11 @@ pub mod font_data {
 use crate::drivers::strip::StripBuffer;
 use bitmap::BitmapFont;
 
-/// Number of available font size tiers.
 pub const FONT_SIZE_COUNT: usize = 5;
 
-/// Human-readable names for each size tier, indexed by size index.
 pub const FONT_SIZE_NAMES: &[&str] = &["XSmall", "Small", "Medium", "Large", "XLarge"];
 
-// ── pre-resolved font pairs ─────────────────────────────────────────
-
-/// Pre-resolved body + heading font pair for a given size index.
+// pre-resolved body + heading font pair for a given size index
 #[derive(Clone, Copy)]
 pub struct UiFonts {
     pub body: &'static BitmapFont,
@@ -38,9 +34,7 @@ impl UiFonts {
     }
 }
 
-// ── individual font lookups ─────────────────────────────────────────
-
-/// Human-readable name for size index (clamped to valid range).
+// human-readable name for size index (clamped to valid range)
 #[inline]
 pub fn font_size_name(idx: u8) -> &'static str {
     FONT_SIZE_NAMES
@@ -49,13 +43,11 @@ pub fn font_size_name(idx: u8) -> &'static str {
         .unwrap_or("Small")
 }
 
-/// Maximum valid size index.
 #[inline]
 pub const fn max_size_idx() -> u8 {
     (FONT_SIZE_COUNT - 1) as u8
 }
 
-/// Regular body font for the given size index.
 pub fn body_font(idx: u8) -> &'static BitmapFont {
     match idx {
         0 => &font_data::REGULAR_BODY_XSMALL,
@@ -67,14 +59,12 @@ pub fn body_font(idx: u8) -> &'static BitmapFont {
     }
 }
 
-/// Chrome font (button labels, quick-menu items, loading text).
-///
-/// Always the XSmall body font — compact for UI chrome elements.
+// chrome font (button labels, quick-menu items, loading text)
+// always the XSmall body font, compact for UI chrome
 pub fn chrome_font() -> &'static BitmapFont {
     body_font(0)
 }
 
-/// Heading font for the given size index.
 pub fn heading_font(idx: u8) -> &'static BitmapFont {
     match idx {
         0 => &font_data::REGULAR_HEADING_XSMALL,
@@ -86,8 +76,6 @@ pub fn heading_font(idx: u8) -> &'static BitmapFont {
     }
 }
 
-// ── text styles ─────────────────────────────────────────────────────
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Style {
     Regular,
@@ -96,12 +84,8 @@ pub enum Style {
     Heading,
 }
 
-// ── full font set (regular / bold / italic / heading) ───────────────
-
-/// Complete set of four style variants at a single size tier.
-///
-/// Missing weights (e.g. no bold TTF) fall back to regular
-/// automatically at construction time.
+// complete set of four style variants at a single size tier
+// missing weights fall back to regular automatically
 #[derive(Clone, Copy)]
 pub struct FontSet {
     regular: &'static BitmapFont,
@@ -141,7 +125,6 @@ impl FontSet {
         }
     }
 
-    /// Build a full font set for the given size index.
     pub fn for_size(idx: u8) -> Self {
         match idx {
             0 => Self::from_fonts(
@@ -183,7 +166,6 @@ impl FontSet {
         }
     }
 
-    /// Default font set (Small).
     pub fn new() -> Self {
         Self::for_size(1)
     }

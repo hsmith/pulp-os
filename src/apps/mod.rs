@@ -14,8 +14,6 @@ pub mod upload;
 
 use crate::kernel::app::AppIdType;
 
-// ── app identity (distro-specific) ──────────────────────────────────
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppId {
     Home,
@@ -31,12 +29,8 @@ impl AppIdType for AppId {
     const HOME: Self = Self::Home;
 }
 
-// ── type aliases (bind generic kernel types to our AppId) ───────────
-
 pub type Transition = crate::kernel::app::Transition<AppId>;
 pub type NavEvent = crate::kernel::app::NavEvent<AppId>;
 pub type Launcher = crate::kernel::app::Launcher<AppId>;
-
-// ── re-exports from kernel::app ─────────────────────────────────────
 
 pub use crate::kernel::app::{App, AppContext, PendingSetting, RECENT_FILE, Redraw};

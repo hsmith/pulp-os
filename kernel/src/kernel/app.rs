@@ -26,8 +26,6 @@ use super::KernelHandle;
 use super::bookmarks::BookmarkCache;
 use super::config::{SystemSettings, WifiConfig};
 
-// ── quick action protocol ───────────────────────────────────────────
-
 pub const MAX_APP_ACTIONS: usize = 6;
 
 #[derive(Debug, Clone, Copy)]
@@ -71,12 +69,8 @@ impl QuickAction {
     }
 }
 
-// ── cross-app constants ─────────────────────────────────────────────
-
 pub const RECENT_FILE: &str = "RECENT";
 
-// ── app identity ────────────────────────────────────────────────────
-//
 // distros define their own AppId enum and implement this trait.
 // the kernel uses HOME to initialise the nav stack and reset on
 // Transition::Home. nothing else about the concrete variants is
@@ -90,8 +84,6 @@ pub trait AppIdType: Copy + Eq + core::fmt::Debug {
 pub enum PendingSetting {
     BookFontSize(u8),
 }
-
-// ── transitions ─────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Transition<Id> {
@@ -108,8 +100,6 @@ pub enum Redraw {
     Partial(Region),
     Full,
 }
-
-// ── app context ─────────────────────────────────────────────────────
 
 const MSG_BUF_SIZE: usize = 64;
 
@@ -182,8 +172,6 @@ impl AppContext {
     }
 }
 
-// ── app trait ───────────────────────────────────────────────────────
-
 #[allow(async_fn_in_trait)]
 pub trait App<Id> {
     async fn on_enter(&mut self, ctx: &mut AppContext, k: &mut KernelHandle<'_>);
@@ -224,8 +212,6 @@ pub trait App<Id> {
 
     fn background_suspended(&mut self, _k: &mut KernelHandle<'_>) {}
 }
-
-// ── navigation stack ────────────────────────────────────────────────
 
 const MAX_STACK_DEPTH: usize = 4;
 
@@ -320,8 +306,6 @@ impl<Id: AppIdType> Launcher<Id> {
     }
 }
 
-// ── app layer trait ─────────────────────────────────────────────────
-//
 // aggregate interface the kernel scheduler calls on the app layer.
 // a distro implements this (typically via an AppManager struct that
 // holds concrete app types and a with_app! dispatch macro). the

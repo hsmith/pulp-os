@@ -72,7 +72,7 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     // Safety: TIMG0 and SW_INTERRUPT are cloned here and consumed by
     // esp_rtos::start. They are never used again after this point.
     // Board::init (which takes ownership of `peripherals`) does not
-    // touch TIMG0 or SW_INTERRUPT — see the pin ownership table in
+    // touch TIMG0 or SW_INTERRUPT, see the pin ownership table in
     // board/mod.rs for the full split.
     let timg0 = TimerGroup::new(unsafe { peripherals.TIMG0.clone_unchecked() });
     let sw_ints =
@@ -81,8 +81,8 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
 
     // Peripherals move into Board::init, which splits them across
     // init_input (ADC pins, GPIO3, IO_MUX) and init_spi_peripherals
-    // (SPI2, DMA, display + SD GPIOs). Each peripheral is used in
-    // exactly one place — see the ownership table in board/mod.rs.
+    // (SPI2, DMA, display + SD GPIOs). each peripheral is used in
+    // exactly one place, see the ownership table in board/mod.rs.
     let board = Board::init(peripherals);
     console.push("spi: dma ch0, 4096B tx+rx");
 

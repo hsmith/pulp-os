@@ -265,11 +265,11 @@ impl BookmarkCache {
 
         let write_slot = target.or(first_free).unwrap_or_else(|| {
             if self.count >= SLOTS {
-                // Evict the least-recently-used valid slot.  If no valid
+                // evict the least-recently-used valid slot. if no valid
                 // LRU candidate was found (every slot was invalid), they
                 // would all have been captured by first_free above, so
-                // this path is unreachable — fall back to 0 as a safe
-                // default rather than panicking.
+                // this path is unreachable; fall back to 0 as a safe
+                // default rather than panicking
                 lru_slot.unwrap_or(0)
             } else {
                 self.count

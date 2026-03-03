@@ -101,7 +101,7 @@ pub(super) enum State {
     Error,
 }
 
-// background caching progress -- runs independently of the reading
+// background caching progress, runs independently of the reading
 // state so the user can read while chapters/images are cached
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum BgCacheState {
@@ -1274,7 +1274,7 @@ impl App<AppId> for ReaderApp {
                         }
                         if b >= 0x80 {
                             // continuation byte mid-stream (already consumed
-                            // by a lead byte above, or stray) — skip
+                            // by a lead byte above, or stray), skip
                             j += 1;
                             continue;
                         }

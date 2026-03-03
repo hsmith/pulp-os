@@ -69,27 +69,23 @@ fn linker_be_nice() {
     );
 }
 
-// ── font rasterisation ──────────────────────────────────────────────
-//
-// Build-time font rasterisation: scan assets/fonts/ for TTFs, classify
+// build-time font rasterisation: scan assets/fonts/ for TTFs, classify
 // by weight/style, rasterise to 1-bit bitmaps, emit font_data.rs.
 //
-// Five size tiers: XSmall / Small / Medium / Large / XLarge.
-// Two glyph sets per font:
-//   • ASCII 0x20–0x7E (contiguous direct-indexed table)
-//   • Extended Unicode (sorted codepoint table, binary-searched at runtime)
+// five size tiers: XSmall / Small / Medium / Large / XLarge
+// two glyph sets per font:
+//   ascii 0x20-0x7E (contiguous direct-indexed table)
+//   extended unicode (sorted codepoint table, binary-searched at runtime)
 //
-// Extended set covers Latin-1 Supplement, common punctuation (smart
+// extended set covers latin-1 supplement, common punctuation (smart
 // quotes, dashes, ellipsis, bullet), and a handful of currency/math
-// symbols — enough for the vast majority of European-language EPUBs.
+// symbols, enough for the vast majority of european-language epubs.
 
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-// ── size tiers ──────────────────────────────────────────────────────
-
-// Body sizes (px): 0=XSmall 1=Small 2=Medium 3=Large 4=XLarge
+// body sizes (px): 0=XSmall 1=Small 2=Medium 3=Large 4=XLarge
 const BODY_PX: [(f32, &str); 5] = [
     (14.0, "XSMALL"),
     (17.0, "SMALL"),
@@ -107,8 +103,6 @@ const HEADING_PX: [(f32, &str); 5] = [
     (42.0, "XLARGE"),
 ];
 
-// ── character sets ──────────────────────────────────────────────────
-
 // fontdue coverage threshold; values >= this become black
 const THRESHOLD: u8 = 100;
 
@@ -117,12 +111,12 @@ const FIRST_CHAR: u8 = 0x20;
 const LAST_CHAR: u8 = 0x7E;
 const GLYPH_COUNT: usize = (LAST_CHAR - FIRST_CHAR + 1) as usize;
 
-/// Build the sorted list of extended Unicode codepoints to rasterise.
+// build the sorted list of extended unicode codepoints to rasterise
 fn extended_codepoints() -> Vec<u32> {
     let mut cps: Vec<u32> = Vec::new();
 
-    // Latin-1 Supplement (0x00A0–0x00FF): accented letters, symbols
-    // Skip 0x00A0 (NBSP) and 0x00AD (soft hyphen) — they are whitespace
+    // latin-1 supplement (0x00A0-0x00FF): accented letters, symbols
+    // skip 0x00A0 (NBSP) and 0x00AD (soft hyphen), they are whitespace
     for cp in 0x00A1..=0x00FFu32 {
         if cp == 0x00AD {
             continue; // soft hyphen, handled as whitespace
@@ -202,8 +196,6 @@ fn extended_codepoints() -> Vec<u32> {
     cps
 }
 
-// ── font discovery ──────────────────────────────────────────────────
-
 // find first .ttf in dir whose name contains all keywords (case-insensitive);
 // excludes BoldItalic unless explicitly requested
 fn find_ttf(dir: &Path, keywords: &[&str]) -> Option<PathBuf> {
@@ -247,8 +239,6 @@ fn find_ttf(dir: &Path, keywords: &[&str]) -> Option<PathBuf> {
     }
     None
 }
-
-// ── main generator ──────────────────────────────────────────────────
 
 fn generate_bitmap_fonts() {
     let out_dir = std::env::var("OUT_DIR").unwrap();
@@ -404,8 +394,6 @@ fn generate_bitmap_fonts() {
     }
 }
 
-// ── per-font emitter ────────────────────────────────────────────────
-
 struct RasterGlyph {
     advance: u8,
     offset_x: i8,
@@ -465,7 +453,7 @@ fn emit_font(
     let line_height = lm.new_line_size.ceil() as u16;
     let ascent = lm.ascent.ceil() as u16;
 
-    // ── ASCII glyphs (direct-indexed 0x20–0x7E) ────────────────────
+    // ascii glyphs (direct-indexed 0x20-0x7E)
 
     let mut ascii_glyphs: Vec<RasterGlyph> = Vec::with_capacity(GLYPH_COUNT);
     let mut ascii_bits_total: usize = 0;
@@ -497,7 +485,7 @@ fn emit_font(
     writeln!(out, "];").unwrap();
     writeln!(out).unwrap();
 
-    // ── extended Unicode glyphs (sorted by codepoint) ───────────────
+    // extended unicode glyphs (sorted by codepoint)
 
     let mut ext_glyphs: Vec<RasterGlyph> = Vec::with_capacity(ext_codepoints.len());
     let mut ext_bits_total: usize = 0;
@@ -508,7 +496,7 @@ fn emit_font(
             ext_bits_total += g.bits.len();
             ext_glyphs.push(g);
         } else {
-            // invalid codepoint — push a zero-width space placeholder
+            // invalid codepoint, push a zero-width space placeholder
             ext_glyphs.push(RasterGlyph {
                 advance: 0,
                 offset_x: 0,
@@ -570,7 +558,7 @@ fn emit_font(
     writeln!(out, "];").unwrap();
     writeln!(out).unwrap();
 
-    // ── BitmapFont struct ───────────────────────────────────────────
+    // BitmapFont struct
 
     writeln!(out, "pub static {name}: BitmapFont = BitmapFont {{").unwrap();
     writeln!(out, "    glyphs: &{name}_GLYPHS,").unwrap();

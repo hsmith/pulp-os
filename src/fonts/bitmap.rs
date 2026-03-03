@@ -1,11 +1,11 @@
 // pre-rasterised 1-bit bitmap font types
-// data in flash via &'static refs from build.rs; packed MSB-first, row-major
+// data in flash via &'static refs from build.rs, packed MSB-first, row-major
 //
-// Two glyph tables per font:
-//   • ASCII 0x20–0x7E: contiguous direct-indexed (fast, zero-search)
-//   • Extended Unicode: sorted codepoint array, binary-searched at runtime
+// two glyph tables per font:
+//   ascii 0x20-0x7E: contiguous direct-indexed (fast, zero-search)
+//   extended unicode: sorted codepoint array, binary-searched at runtime
 //
-// Characters not found in either table render as '?' (ASCII fallback).
+// characters not found in either table render as '?' (ascii fallback)
 
 use embedded_graphics_core::geometry::Size;
 use embedded_graphics_core::pixelcolor::BinaryColor;
@@ -13,15 +13,11 @@ use embedded_graphics_core::pixelcolor::BinaryColor;
 use crate::drivers::strip::StripBuffer;
 use crate::ui::{Alignment, Region};
 
-// ── ASCII range ─────────────────────────────────────────────────────
-
 pub const FIRST_CHAR: u8 = 0x20;
 pub const LAST_CHAR: u8 = 0x7E;
 pub const GLYPH_COUNT: usize = (LAST_CHAR - FIRST_CHAR + 1) as usize;
 
-/// Map a raw byte to a printable ASCII `char`.
-///
-/// Bytes outside the printable ASCII range are replaced with `'?'`.
+// map a raw byte to a printable ascii char, or '?' if out of range
 #[inline]
 pub fn byte_to_char(b: u8) -> char {
     if (FIRST_CHAR..=LAST_CHAR).contains(&b) {
@@ -31,58 +27,36 @@ pub fn byte_to_char(b: u8) -> char {
     }
 }
 
-// ── glyph data ──────────────────────────────────────────────────────
-
-/// Metrics and bitmap location for a single rasterised glyph.
+// metrics and bitmap location for a single rasterised glyph
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct BitmapGlyph {
-    /// Horizontal advance width in pixels.
-    pub advance: u8,
-    /// Horizontal offset from the cursor to the glyph's left edge.
-    pub offset_x: i8,
-    /// Vertical offset from the baseline to the glyph's top edge
-    /// (negative = above baseline).
-    pub offset_y: i8,
-    /// Glyph bitmap width in pixels.
-    pub width: u8,
-    /// Glyph bitmap height in pixels.
-    pub height: u8,
-    /// Byte offset into the corresponding bitmap array.
-    pub bitmap_offset: u16,
+    pub advance: u8,        // horizontal advance width in pixels
+    pub offset_x: i8,       // cursor to glyph left edge
+    pub offset_y: i8,       // baseline to glyph top (negative = above)
+    pub width: u8,          // bitmap width in pixels
+    pub height: u8,         // bitmap height in pixels
+    pub bitmap_offset: u16, // byte offset into bitmap array
 }
 
-// ── BitmapFont ──────────────────────────────────────────────────────
-
-/// A pre-rasterised 1-bit bitmap font stored in flash.
-///
-/// Contains two glyph sets:
-/// - **ASCII** (`glyphs` / `bitmaps`): direct-indexed for U+0020–U+007E.
-/// - **Extended** (`ext_codepoints` / `ext_glyphs` / `ext_bitmaps`):
-///   sorted by codepoint, binary-searched at runtime.
-///
-/// Generated at build time by `build.rs`; zero heap, zero parsing.
+// pre-rasterised 1-bit bitmap font stored in flash
+//
+// ascii glyphs are direct-indexed for 0x20-0x7E
+// extended unicode glyphs are sorted by codepoint, binary-searched
+// generated at build time by build.rs; zero heap, zero parsing
 pub struct BitmapFont {
-    /// ASCII glyphs, indexed by `(char as u8) - FIRST_CHAR`.
-    pub glyphs: &'static [BitmapGlyph; GLYPH_COUNT],
-    /// Packed 1-bit bitmap data for ASCII glyphs.
-    pub bitmaps: &'static [u8],
+    pub glyphs: &'static [BitmapGlyph; GLYPH_COUNT], // ascii, indexed by (ch - FIRST_CHAR)
+    pub bitmaps: &'static [u8],                      // packed 1-bit data for ascii
 
-    /// Sorted array of extended Unicode codepoints.
-    pub ext_codepoints: &'static [u32],
-    /// Extended glyph metrics, parallel to `ext_codepoints`.
-    pub ext_glyphs: &'static [BitmapGlyph],
-    /// Packed 1-bit bitmap data for extended glyphs.
-    pub ext_bitmaps: &'static [u8],
+    pub ext_codepoints: &'static [u32], // sorted extended unicode codepoints
+    pub ext_glyphs: &'static [BitmapGlyph], // parallel to ext_codepoints
+    pub ext_bitmaps: &'static [u8],     // packed 1-bit data for extended
 
-    /// Line height in pixels (ascent + descent + leading).
-    pub line_height: u16,
-    /// Ascent in pixels (baseline to top of tallest glyph).
-    pub ascent: u16,
+    pub line_height: u16, // ascent + descent + leading
+    pub ascent: u16,      // baseline to top of tallest glyph
 }
 
-/// Result of a glyph lookup: the glyph metrics and which bitmap
-/// table to use for rendering.
+// result of a glyph lookup: metrics and which bitmap table to use
 #[derive(Clone, Copy)]
 pub struct ResolvedGlyph<'a> {
     pub glyph: &'a BitmapGlyph,
@@ -90,25 +64,19 @@ pub struct ResolvedGlyph<'a> {
 }
 
 impl BitmapFont {
-    // ── glyph lookup ────────────────────────────────────────────────
-
-    /// Look up a character and return its glyph metrics.
-    ///
-    /// For ASCII (U+0020–U+007E) this is a direct array index.
-    /// For extended Unicode, a binary search over the sorted codepoint
-    /// table.  Characters not in either table fall back to the space
-    /// glyph (index 0).
+    // look up a character, return glyph metrics
+    // ascii: direct array index; extended: binary search
+    // unknown chars fall back to space glyph (index 0)
     #[inline]
     pub fn glyph(&self, ch: char) -> &BitmapGlyph {
         self.resolve(ch).glyph
     }
 
-    /// Look up a character and return both the glyph and the correct
-    /// bitmap slice for rendering.
+    // look up a character, return glyph + correct bitmap slice
     pub fn resolve(&self, ch: char) -> ResolvedGlyph<'_> {
         let code = ch as u32;
 
-        // fast path: ASCII
+        // fast path: ascii
         if code >= FIRST_CHAR as u32 && code <= LAST_CHAR as u32 {
             return ResolvedGlyph {
                 glyph: &self.glyphs[(code - FIRST_CHAR as u32) as usize],
@@ -116,7 +84,7 @@ impl BitmapFont {
             };
         }
 
-        // extended Unicode: binary search
+        // extended unicode: binary search
         if let Ok(idx) = self.ext_codepoints.binary_search(&code) {
             return ResolvedGlyph {
                 glyph: &self.ext_glyphs[idx],
@@ -124,7 +92,7 @@ impl BitmapFont {
             };
         }
 
-        // fallback: '?' glyph from ASCII table
+        // fallback: '?' from ascii table
         let q_idx = (b'?' - FIRST_CHAR) as usize;
         ResolvedGlyph {
             glyph: &self.glyphs[q_idx],
@@ -132,8 +100,7 @@ impl BitmapFont {
         }
     }
 
-    /// Returns `true` if this font has a glyph for `ch` (not just
-    /// the fallback '?').
+    // true if this font has a real glyph for ch (not just '?' fallback)
     #[inline]
     pub fn has_glyph(&self, ch: char) -> bool {
         let code = ch as u32;
@@ -143,35 +110,30 @@ impl BitmapFont {
         self.ext_codepoints.binary_search(&code).is_ok()
     }
 
-    // ── measurement ─────────────────────────────────────────────────
-
-    /// Horizontal advance for a single character.
+    // horizontal advance for a single character
     #[inline]
     pub fn advance(&self, ch: char) -> u8 {
         self.glyph(ch).advance
     }
 
-    /// Total width in pixels of a `&str`.
+    // total width in pixels of a &str
     #[inline]
     pub fn measure_str(&self, text: &str) -> u16 {
         text.chars().map(|c| self.advance(c) as u16).sum()
     }
 
-    /// Total width in pixels of a `&[u8]` slice (decodes UTF-8).
+    // total width in pixels of a &[u8] slice (decodes utf-8)
     pub fn measure_bytes(&self, text: &[u8]) -> u16 {
         Utf8Iter::new(text).map(|c| self.advance(c) as u16).sum()
     }
 
-    // ── drawing (single character) ──────────────────────────────────
-
-    /// Draw a character at `(cx, baseline)` in black.  Returns advance.
+    // draw a character at (cx, baseline) in black, return advance
     #[inline]
     pub fn draw_char(&self, strip: &mut StripBuffer, ch: char, cx: i32, baseline: i32) -> u8 {
         self.draw_char_fg(strip, ch, BinaryColor::On, cx, baseline)
     }
 
-    /// Draw a character at `(cx, baseline)` with the given foreground
-    /// colour.  Returns the horizontal advance.
+    // draw a character with given foreground colour, return advance
     #[inline]
     pub fn draw_char_fg(
         &self,
@@ -189,14 +151,12 @@ impl BitmapFont {
         g.advance
     }
 
-    // ── drawing (strings) ───────────────────────────────────────────
-
-    /// Draw a `&str` at `(cx, baseline)` in black.  Returns final X.
+    // draw a &str at (cx, baseline) in black, return final x
     pub fn draw_str(&self, strip: &mut StripBuffer, text: &str, cx: i32, baseline: i32) -> i32 {
         self.draw_str_fg(strip, text, BinaryColor::On, cx, baseline)
     }
 
-    /// Draw a `&str` at `(cx, baseline)` with the given foreground.
+    // draw a &str with given foreground, return final x
     pub fn draw_str_fg(
         &self,
         strip: &mut StripBuffer,
@@ -212,8 +172,7 @@ impl BitmapFont {
         x
     }
 
-    /// Draw a `&[u8]` slice (decoded as UTF-8) at `(cx, baseline)` in
-    /// black.  Returns the final X cursor position.
+    // draw a &[u8] (decoded as utf-8) at (cx, baseline) in black, return final x
     pub fn draw_bytes(&self, strip: &mut StripBuffer, text: &[u8], cx: i32, baseline: i32) -> i32 {
         let mut x = cx;
         for ch in Utf8Iter::new(text) {
@@ -222,8 +181,7 @@ impl BitmapFont {
         x
     }
 
-    /// Draw a `&[u8]` slice (decoded as UTF-8) with the given
-    /// foreground colour.  Returns the final X cursor position.
+    // draw a &[u8] with given foreground, return final x
     pub fn draw_bytes_fg(
         &self,
         strip: &mut StripBuffer,
@@ -239,9 +197,7 @@ impl BitmapFont {
         x
     }
 
-    // ── aligned drawing ─────────────────────────────────────────────
-
-    /// Draw a `&str` aligned within a [`Region`].
+    // draw a &str aligned within a region
     pub fn draw_aligned(
         &self,
         strip: &mut StripBuffer,
@@ -260,8 +216,6 @@ impl BitmapFont {
         self.draw_str_fg(strip, text, fg, top_left.x, baseline);
     }
 }
-
-// ── glyph blitting ──────────────────────────────────────────────────
 
 fn blit_glyph(
     strip: &mut StripBuffer,
@@ -289,21 +243,15 @@ fn blit_glyph(
     );
 }
 
-// ── minimal UTF-8 byte-slice iterator ───────────────────────────────
-//
-// Decodes a `&[u8]` slice one `char` at a time.  Invalid sequences
-// are replaced with U+FFFD (which will render as '?' via the font
-// fallback).  This avoids pulling in `core::str::from_utf8` for
-// byte-oriented text buffers.
-
-/// Byte-level UTF-8 decoder that yields `char` values.
+// minimal utf-8 byte-slice iterator
+// decodes &[u8] one char at a time; invalid sequences replaced with U+FFFD
+// (which renders as '?' via the font fallback)
 pub struct Utf8Iter<'a> {
     data: &'a [u8],
     pos: usize,
 }
 
 impl<'a> Utf8Iter<'a> {
-    /// Create a new iterator over the given byte slice.
     #[inline]
     pub fn new(data: &'a [u8]) -> Self {
         Self { data, pos: 0 }
@@ -320,7 +268,7 @@ impl Iterator for Utf8Iter<'_> {
 
         let b0 = self.data[self.pos];
 
-        // single-byte ASCII
+        // single-byte ascii
         if b0 < 0x80 {
             self.pos += 1;
             return Some(b0 as char);
@@ -328,7 +276,7 @@ impl Iterator for Utf8Iter<'_> {
 
         // determine expected sequence length from lead byte
         let (mut cp, expected) = if b0 < 0xC0 {
-            // stray continuation byte — skip it
+            // stray continuation byte
             self.pos += 1;
             return Some('\u{FFFD}');
         } else if b0 < 0xE0 {
@@ -342,7 +290,6 @@ impl Iterator for Utf8Iter<'_> {
             return Some('\u{FFFD}');
         };
 
-        // check that we have enough bytes
         if self.pos + expected > self.data.len() {
             self.pos = self.data.len();
             return Some('\u{FFFD}');
@@ -352,7 +299,6 @@ impl Iterator for Utf8Iter<'_> {
         for i in 1..expected {
             let cont = self.data[self.pos + i];
             if cont & 0xC0 != 0x80 {
-                // broken sequence — consume up to the bad byte
                 self.pos += i;
                 return Some('\u{FFFD}');
             }

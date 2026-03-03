@@ -81,17 +81,17 @@ impl super::Kernel {
             //
             // The EPD and SD card share a single SPI2 bus via
             // CriticalSectionDevice (RefCell under the hood).  SD I/O
-            // and EPD rendering must NEVER overlap — concurrent access
+            // and EPD rendering must NEVER overlap, concurrent access
             // would cause a RefCell borrow panic at runtime.
             //
             // This ordering enforces that:
             //   1. All background SD I/O (app caching, title scan, etc.)
             //      completes here, before any EPD access.
             //   2. poll_housekeeping may do SD I/O (bookmark flush,
-            //      SD probe) — also before render.
+            //      SD probe), also before render.
             //   3. render() is the only code below that touches the EPD.
             //   4. busy_wait_with_input() does NOT run background work
-            //      while the EPD is refreshing — only input collection.
+            //      while the EPD is refreshing, only input collection.
             //
             // If you add new SD I/O call sites, they MUST go above the
             // render() call.  Violating this will panic, not corrupt.
@@ -337,7 +337,7 @@ impl super::Kernel {
         self.epd.enter_deep_sleep();
         info!("display: deep sleep mode 1");
 
-        // Safety: deep sleep never returns — the MCU resets on wake, so
+        // safety: deep sleep never returns, the MCU resets on wake, so
         // these stolen peripherals cannot alias with their original
         // owners.  LPWR is not used elsewhere; GPIO3 was previously
         // cloned into InputHw but we are about to halt the CPU.

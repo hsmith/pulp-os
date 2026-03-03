@@ -339,10 +339,8 @@ impl ReaderApp {
     }
 }
 
-/// Decode one UTF-8 character starting at `buf[pos]`.
-///
-/// Returns `(char, byte_length)`.  On malformed input returns
-/// `('\u{FFFD}', consumed)` where `consumed` skips past the bad bytes.
+// decode one utf-8 character starting at buf[pos]
+// returns (char, byte_length); malformed input yields ('\u{FFFD}', consumed)
 pub(super) fn decode_utf8_char(buf: &[u8], pos: usize) -> (char, usize) {
     let b0 = buf[pos];
     let (mut cp, expected) = if b0 < 0xE0 {
@@ -375,8 +373,7 @@ pub(super) fn trim_trailing_cr(buf: &[u8], start: usize, end: usize) -> usize {
     }
 }
 
-/// Returns `true` if `ch` should be treated as a word-separator for
-/// line-wrapping purposes (spaces, NBSP, zero-width spaces, etc.).
+// true if ch is a word-separator for line-wrapping (space, NBSP, etc)
 #[inline]
 fn is_wrap_space(ch: char) -> bool {
     matches!(ch, ' ' | '\u{00A0}')
