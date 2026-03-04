@@ -1,10 +1,10 @@
 // kernel: owns hardware resources, caches, and system state
 //
 // constructed once during boot in main(), lives for the lifetime of
-// the program. not a separate Embassy task -- a struct held by main.
+// the program; not a separate Embassy task -- a struct held by main
 //
 // apps interact exclusively through KernelHandle, which borrows the
-// kernel for the duration of an async lifecycle method.
+// kernel for the duration of an async lifecycle method
 
 pub mod app;
 pub mod bookmarks;
@@ -20,8 +20,7 @@ pub mod work_queue;
 // Unified error types (primary home: crate::error)
 pub use crate::error::{Error, ErrorKind, Result, ResultExt};
 
-// Backward-compatible alias so `kernel::StorageError` keeps working
-// during migration.  It is now `type StorageError = Error`.
+// backward-compatible alias
 pub use crate::drivers::storage::StorageError;
 
 pub use app::{

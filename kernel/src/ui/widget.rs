@@ -1,10 +1,12 @@
-// region geometry and alignment helpers, progress bar drawing
+// region geometry, alignment helpers, progress bar, loading indicator
 
 use embedded_graphics::{
-    pixelcolor::BinaryColor, prelude::*, primitives::PrimitiveStyle, primitives::Rectangle,
+    mono_font::MonoTextStyle, mono_font::ascii::FONT_6X13, pixelcolor::BinaryColor, prelude::*,
+    primitives::PrimitiveStyle, primitives::Rectangle, text::Text,
 };
 
 use crate::drivers::strip::StripBuffer;
+use crate::ui::stack_fmt::BorrowedFmt;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Region {
@@ -115,10 +117,10 @@ pub fn wrap_prev(current: usize, count: usize) -> usize {
     if current == 0 { count - 1 } else { current - 1 }
 }
 
-// horizontal progress bar for 1-bit e-paper.
+// horizontal progress bar for 1-bit e-paper
 // draws a 1px black border around the full track and fills
-// proportionally from the left. pct is clamped to 0..=100.
-// region should be at least 4px wide and 4px tall.
+// proportionally from the left; pct is clamped to 0..=100
+// region should be at least 4px wide and 4px tall
 pub fn draw_progress_bar(strip: &mut StripBuffer, region: Region, pct: u8) {
     let pct = pct.min(100) as u32;
 
@@ -148,4 +150,37 @@ pub fn draw_progress_bar(strip: &mut StripBuffer, region: Region, pct: u8) {
         .draw(strip)
         .unwrap();
     }
+}
+
+// loading indicator for 1-bit e-paper
+// draws "msg...pct%" centered vertically in the region using the
+// built-in FONT_6X13 mono font; works without any custom bitmap
+// fonts loaded, usable from any app or the kernel itself
+//
+// typical usage:
+//   draw_loading_indicator(strip, region, "Loading", 25)  => "Loading...25%"
+//   draw_loading_indicator(strip, region, "Caching 3/15", 20)  => "Caching 3/15...20%"
+pub fn draw_loading_indicator(strip: &mut StripBuffer, region: Region, msg: &str, pct: u8) {
+    use core::fmt::Write;
+
+    // clear region
+    region
+        .to_rect()
+        .into_styled(PrimitiveStyle::with_fill(BinaryColor::Off))
+        .draw(strip)
+        .unwrap();
+
+    // format "msg...pct%"
+    let mut buf = [0u8; 48];
+    let mut fmt = BorrowedFmt::new(&mut buf);
+    let _ = write!(fmt, "{}...{}%", msg, pct.min(100));
+    let text = fmt.as_str();
+
+    // FONT_6X13: 6px wide, 13px tall, ~10px ascent
+    // center vertically; baseline = region.y + (h + 7) / 2
+    let style = MonoTextStyle::new(&FONT_6X13, BinaryColor::On);
+    let baseline_y = region.y as i32 + (region.h as i32 + 7) / 2;
+    Text::new(text, Point::new(region.x as i32 + 2, baseline_y), style)
+        .draw(strip)
+        .unwrap();
 }

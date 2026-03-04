@@ -2,8 +2,8 @@
 // once to EPD before the app layer takes over
 //
 // uses the embedded-graphics built-in FONT_6X13 -- no TTF assets or
-// build.rs font pipeline needed. the kernel can show boot progress
-// on a bare display with nothing but this mono font.
+// build.rs font pipeline needed; the kernel can show boot progress
+// on a bare display with nothing but this mono font
 
 use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::mono_font::ascii::FONT_6X13;

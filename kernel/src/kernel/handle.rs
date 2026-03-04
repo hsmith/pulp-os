@@ -1,11 +1,11 @@
 // kernel handle: synchronous syscall boundary for apps
 //
 // every storage method calls a single storage::* function and returns
-// the unified Error result. apps call these directly.
+// the unified Error result; apps call these directly
 //
-// app-specific logic (bookmarks, title scan, etc.) accesses the
+// app-specific logic (bookmarks, title scan, etc) accesses the
 // underlying caches directly via bookmark_cache() / dir_cache_mut()
-// rather than through dedicated handle methods.
+// rather than through dedicated handle methods
 
 use crate::drivers::storage::{self, DirEntry, DirPage};
 use crate::error::{Error, Result};

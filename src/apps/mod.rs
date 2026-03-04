@@ -1,7 +1,7 @@
 // app modules, AppId definition, and re-exports from kernel::app
 //
 // AppId is defined here (the distro side) -- the kernel is generic
-// over AppIdType and never knows which concrete apps exist.
+// over AppIdType and never knows which concrete apps exist
 
 pub mod files;
 pub mod home;
@@ -35,9 +35,8 @@ pub type Launcher = crate::kernel::app::Launcher<AppId>;
 
 pub use crate::kernel::app::{App, AppContext, PendingSetting, RECENT_FILE, Redraw};
 
-// Unified error types — available to all app code as `crate::apps::Error` etc.
+// unified error types
 pub use crate::kernel::{Error, ErrorKind, Result, ResultExt};
 
-// Backward-compatible alias; old app code referencing `StorageError`
-// keeps compiling — it is now `type StorageError = Error`.
+// backward-compatible alias
 pub use crate::kernel::StorageError;

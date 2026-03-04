@@ -1,75 +1,43 @@
-// Unified error type for pulp-os
+// unified error type for pulp-os
 //
-// Replaces the flat `StorageError` enum and ad-hoc `&'static str`
-// errors with a single `Copy` type that carries:
-//
-//   ErrorKind  — *what* went wrong (storage, parse, resource …)
-//   source     — *where* it happened (`&'static str`, usually
-//                module_path!() or a short caller-supplied tag)
-//
-// Every `Result` in the kernel and app layers should use this type.
-// The smol-epub trait boundary (`Result<T, &'static str>`) converts
-// at the edge via the `From` impls.
+// single Copy type carrying ErrorKind (what) and a &'static str
+// source tag (where); smol-epub boundary converts via From impls
 
 use core::fmt;
 
-// ---------------------------------------------------------------------------
-// ErrorKind — the category of failure
-// ---------------------------------------------------------------------------
-
-/// What went wrong.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ErrorKind {
-    // -- storage / SD card --
-    /// SD card not inserted or not responding.
+    // storage / sd card
     NoCard,
-    /// Could not open the FAT volume.
     OpenVolume,
-    /// Could not open a directory.
     OpenDir,
-    /// Could not open a file.
     OpenFile,
-    /// Read I/O failed.
     ReadFailed,
-    /// Write I/O failed.
     WriteFailed,
-    /// Seek within a file failed.
     SeekFailed,
-    /// Delete operation failed.
     DeleteFailed,
-    /// Directory is full (cannot create entry).
     DirFull,
-    /// File or directory not found.
     NotFound,
 
-    // -- data / parsing --
-    /// EPUB, ZIP, or similar structure is invalid.
+    // data / parsing
     ParseFailed,
-    /// Data is malformed or unexpected.
     InvalidData,
-    /// UTF-8 or other text-encoding error.
     BadEncoding,
 
-    // -- resources --
-    /// Heap allocation failed.
+    // resources
     OutOfMemory,
-    /// Supplied buffer is too small for the operation.
     BufferTooSmall,
 
-    // -- network (upload) --
-    /// Network read/write failed.
+    // network (upload)
     NetworkIo,
-    /// Protocol-level error (HTTP, multipart, etc.).
     Protocol,
 
-    // -- catch-all --
-    /// Unclassified error (carries context in `source`).
+    // catch-all
     Other,
 }
 
 impl ErrorKind {
-    /// Short human-readable label (suitable for UI and log lines).
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::NoCard => "no sd card",
@@ -93,7 +61,6 @@ impl ErrorKind {
         }
     }
 
-    /// True for any variant that originates from SD-card storage I/O.
     pub const fn is_storage(self) -> bool {
         matches!(
             self,
@@ -117,54 +84,24 @@ impl fmt::Display for ErrorKind {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Error — the unified error value
-// ---------------------------------------------------------------------------
-
-/// Unified error for the entire pulp-os stack.
-///
-/// Cheap to copy (one discriminant byte + one `&'static str` pointer).
-/// Carries *what* failed ([`ErrorKind`]) and a compile-time *source*
-/// string that identifies the call-site or subsystem.
-///
-/// # Constructing
-///
-/// ```ignore
-/// // Constant shorthand (no source tag):
-/// Error::READ_FAILED
-///
-/// // With explicit source:
-/// Error::new(ErrorKind::OpenFile, "epub_init_zip")
-///
-/// // Via the err!() macro (auto-stamps module_path!()):
-/// err!(ReadFailed)
-/// err!(OpenFile, "epub_init_zip")
-/// ```
+// one discriminant byte + one &'static str pointer; cheap to copy
+// source is module_path!() or a short caller-supplied tag
 #[derive(Clone, Copy)]
 pub struct Error {
     kind: ErrorKind,
-    /// Where the error was created — a `module_path!()` or free-form
-    /// tag.  Empty string when no source was attached.
     source: &'static str,
 }
 
-// -- construction ----------------------------------------------------------
-
 impl Error {
-    /// Create an error with explicit kind and source tag.
     #[inline]
     pub const fn new(kind: ErrorKind, source: &'static str) -> Self {
         Self { kind, source }
     }
 
-    /// Create an error from a kind alone (no source context).
     #[inline]
     pub const fn from_kind(kind: ErrorKind) -> Self {
         Self { kind, source: "" }
     }
-
-    // Named constants that mirror the old `StorageError` variants so
-    // existing match-arms keep compiling during migration.
 
     pub const NO_CARD: Self = Self::from_kind(ErrorKind::NoCard);
     pub const OPEN_VOLUME: Self = Self::from_kind(ErrorKind::OpenVolume);
@@ -178,24 +115,17 @@ impl Error {
     pub const NOT_FOUND: Self = Self::from_kind(ErrorKind::NotFound);
 }
 
-// -- accessors -------------------------------------------------------------
-
 impl Error {
-    /// The failure category.
     #[inline]
     pub const fn kind(&self) -> ErrorKind {
         self.kind
     }
 
-    /// The compile-time tag identifying where this error was created.
-    /// Returns `""` when no source was attached.
     #[inline]
     pub const fn source_tag(&self) -> &'static str {
         self.source
     }
 
-    /// Attach (or replace) the source tag.  Useful when propagating
-    /// an error upward and adding the caller's context.
     #[inline]
     pub const fn with_source(self, source: &'static str) -> Self {
         Self {
@@ -204,7 +134,6 @@ impl Error {
         }
     }
 
-    /// Change the kind while keeping the source.
     #[inline]
     pub const fn with_kind(self, kind: ErrorKind) -> Self {
         Self {
@@ -213,26 +142,21 @@ impl Error {
         }
     }
 
-    /// True when a source tag has been attached.
     #[inline]
     pub const fn has_source(&self) -> bool {
         !self.source.is_empty()
     }
 
-    /// True when the error originates from storage I/O.
     #[inline]
     pub const fn is_storage(&self) -> bool {
         self.kind.is_storage()
     }
 
-    /// Short label for the smol-epub `Result<T, &'static str>` boundary.
     #[inline]
     pub const fn as_str(&self) -> &'static str {
         self.kind.as_str()
     }
 }
-
-// -- formatting ------------------------------------------------------------
 
 impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -254,8 +178,7 @@ impl fmt::Display for Error {
     }
 }
 
-// -- equality (semantic: kind only, source is diagnostic) ------------------
-
+// equality is semantic: kind only, source is diagnostic
 impl PartialEq for Error {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
@@ -265,14 +188,8 @@ impl PartialEq for Error {
 
 impl Eq for Error {}
 
-// ---------------------------------------------------------------------------
-// Conversions
-// ---------------------------------------------------------------------------
-
-/// Wrap a bare `&'static str` (from smol-epub helpers, etc.) into an
-/// [`Error`].  Well-known strings are mapped to the appropriate kind;
-/// everything else becomes [`ErrorKind::Other`] with the original
-/// string preserved as the source tag.
+// wrap &'static str (smol-epub returns) into Error; well-known
+// strings map to the appropriate kind, rest becomes Other
 impl From<&'static str> for Error {
     #[inline]
     fn from(msg: &'static str) -> Self {
@@ -297,12 +214,10 @@ impl From<&'static str> for Error {
     }
 }
 
-/// Project back to `&'static str` for the smol-epub trait boundary.
+// project back to &'static str for the smol-epub trait boundary
 impl From<Error> for &'static str {
     #[inline]
     fn from(e: Error) -> &'static str {
-        // Prefer the source tag if it is a meaningful human string;
-        // otherwise fall back to the kind label.
         if e.source.is_empty() {
             e.kind.as_str()
         } else {
@@ -311,22 +226,10 @@ impl From<Error> for &'static str {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ResultExt — ergonomic source tagging on Results
-// ---------------------------------------------------------------------------
-
-/// Extension trait for stamping source context onto any
-/// `Result<T, Error>`.
-///
-/// ```ignore
-/// storage::read_file_chunk(sd, name, off, buf)
-///     .source("epub_init_zip")?;
-/// ```
+// ergonomic source tagging on Result<T, Error> and
+// Result<T, &'static str> (smol-epub returns)
 pub trait ResultExt<T> {
-    /// Attach a source tag to the error (if any).
     fn source(self, src: &'static str) -> Result<T>;
-
-    /// Replace the error kind while adding a source tag.
     fn map_kind(self, kind: ErrorKind, src: &'static str) -> Result<T>;
 }
 
@@ -342,8 +245,6 @@ impl<T> ResultExt<T> for Result<T> {
     }
 }
 
-/// Blanket impl so `Result<T, &'static str>` (smol-epub returns) can
-/// be tagged and converted in one step.
 impl<T> ResultExt<T> for core::result::Result<T, &'static str> {
     #[inline]
     fn source(self, src: &'static str) -> Result<T> {
@@ -356,19 +257,9 @@ impl<T> ResultExt<T> for core::result::Result<T, &'static str> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// err! macro — stamps module_path!() automatically
-// ---------------------------------------------------------------------------
-
-/// Create an [`Error`] with the caller's module path baked in.
-///
-/// ```ignore
-/// // Kind only — source is the calling module's path:
-/// err!(ReadFailed)
-///
-/// // Kind + explicit context string:
-/// err!(OpenFile, "epub_init_zip")
-/// ```
+// create an Error with module_path!() as source
+//   err!(ReadFailed)
+//   err!(OpenFile, "epub_init_zip")
 #[macro_export]
 macro_rules! err {
     ($kind:ident) => {
@@ -379,12 +270,8 @@ macro_rules! err {
     };
 }
 
-/// Map any `Result<T, _>` error into an [`Error`] of the given kind,
-/// stamping the caller's module path.
-///
-/// ```ignore
-/// mgr.read(file, buf).await.or_err!(ReadFailed)?;
-/// ```
+// map any Result<T, _> into an Error of the given kind
+//   or_err!(mgr.read(file, buf).await, ReadFailed)
 #[macro_export]
 macro_rules! or_err {
     ($result:expr, $kind:ident) => {
@@ -396,13 +283,4 @@ macro_rules! or_err {
     };
 }
 
-// ---------------------------------------------------------------------------
-// Result alias
-// ---------------------------------------------------------------------------
-
-/// Convenience alias used throughout pulp-os.
-///
-/// Intentionally shadows `core::result::Result` only when imported
-/// unqualified — callers that need the two-param form can still write
-/// `core::result::Result<T, E>`.
 pub type Result<T> = core::result::Result<T, Error>;

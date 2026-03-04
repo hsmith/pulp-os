@@ -2,10 +2,10 @@
 //
 // all I/O through embedded-sdmmc AsyncVolumeManager; functions are
 // synchronous, wrapping async ops with poll_once (SPI bus is blocking
-// so every .await resolves immediately).
+// so every .await resolves immediately)
 //
-// Returns the unified `Error` type (re-exported as `StorageError` for
-// backward compatibility). Apps receive it directly through KernelHandle.
+// returns the unified Error type (re-exported as StorageError for
+// backward compat); apps receive it through KernelHandle
 
 use core::ops::ControlFlow;
 
@@ -18,8 +18,7 @@ pub const PULP_DIR: &str = "_PULP";
 pub const TITLES_FILE: &str = "TITLES.BIN";
 pub const TITLE_CAP: usize = 48;
 
-/// Backward-compatible alias — old code that references `StorageError`
-/// continues to compile while call-sites are migrated to `Error`.
+// backward-compatible alias
 pub type StorageError = Error;
 
 #[derive(Clone, Copy)]
@@ -98,10 +97,8 @@ fn sfn_to_bytes(name: &embedded_sdmmc::ShortFileName, out: &mut [u8; 13]) -> u8 
     pos as u8
 }
 
-// ── file-operation macros ─────────────────────────────────────────
-//
-// each evaluates to Result<T, Error>; none use `?` internally
-// so caller cleanup (close_dir etc) is never bypassed
+// file-operation macros; each evaluates to Result<T, Error>
+// none use ? internally so caller cleanup is never bypassed
 
 macro_rules! op_file_size {
     ($inner:expr, $dir:expr, $name:expr) => {
@@ -220,7 +217,7 @@ macro_rules! op_delete {
     }};
 }
 
-// dir-scoping macros: open subdir, execute body, close handle
+// dir-scoping macros; open subdir, execute body, close handle
 
 macro_rules! in_dir {
     ($inner:expr, $dirname:expr, |$dir:ident| $body:expr) => {
@@ -255,14 +252,12 @@ macro_rules! in_subdir {
     };
 }
 
-// borrow helper
-
 fn borrow(sd: &SdStorage) -> core::result::Result<core::cell::RefMut<'_, SdStorageInner>, Error> {
     sd.borrow_inner()
         .ok_or(Error::new(ErrorKind::NoCard, "storage::borrow"))
 }
 
-// ── root file operations ──────────────────────────────────────────
+// root file operations
 
 pub fn file_size(sd: &SdStorage, name: &str) -> crate::error::Result<u32> {
     poll_once(async {
@@ -321,7 +316,7 @@ pub fn delete_file(sd: &SdStorage, name: &str) -> crate::error::Result<()> {
     })
 }
 
-// ── directory listing ─────────────────────────────────────────────
+// directory listing
 
 pub fn list_root_files(sd: &SdStorage, buf: &mut [DirEntry]) -> crate::error::Result<usize> {
     poll_once(async {
@@ -379,7 +374,7 @@ pub fn list_root_files(sd: &SdStorage, buf: &mut [DirEntry]) -> crate::error::Re
     })
 }
 
-// ── directory management ──────────────────────────────────────────
+// directory management
 
 pub fn ensure_dir(sd: &SdStorage, name: &str) -> crate::error::Result<()> {
     // two poll_once calls so the large make_dir future never shares
@@ -411,7 +406,7 @@ pub fn ensure_dir(sd: &SdStorage, name: &str) -> crate::error::Result<()> {
     })
 }
 
-// ── single-directory file operations ──────────────────────────────
+// single-directory file operations
 
 pub fn write_file_in_dir(
     sd: &SdStorage,
@@ -468,7 +463,7 @@ pub fn read_file_start_in_dir(
     })
 }
 
-// ── async boot path (runs inside the real executor) ───────────────
+// async boot path (runs inside the real executor)
 
 pub async fn ensure_pulp_dir_async(sd: &SdStorage) -> crate::error::Result<()> {
     let mut guard = borrow(sd)?;
@@ -488,7 +483,7 @@ pub async fn ensure_pulp_dir_async(sd: &SdStorage) -> crate::error::Result<()> {
     }
 }
 
-// ── _PULP subdirectory operations ─────────────────────────────────
+// _PULP subdirectory operations
 
 pub fn ensure_pulp_subdir(sd: &SdStorage, name: &str) -> crate::error::Result<()> {
     let exists = poll_once(async {
@@ -590,9 +585,9 @@ pub fn delete_in_pulp_subdir(sd: &SdStorage, dir: &str, name: &str) -> crate::er
     })
 }
 
-// ── title mapping ─────────────────────────────────────────────────
+// title mapping
 
-/// Append a title mapping line to _PULP/TITLES.BIN
+// append a title line to _PULP/TITLES.BIN
 pub fn save_title(sd: &SdStorage, filename: &str, title: &str) -> crate::error::Result<()> {
     let name_bytes = filename.as_bytes();
     let title_bytes = title.as_bytes();

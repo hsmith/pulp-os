@@ -295,6 +295,7 @@ impl BookmarkCache {
         if write_slot >= self.count {
             self.count = write_slot + 1;
         }
+        debug_assert!(self.count <= SLOTS, "bookmark count exceeds slot limit");
 
         self.dirty = true;
 

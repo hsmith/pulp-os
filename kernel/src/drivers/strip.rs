@@ -218,7 +218,10 @@ impl StripBuffer {
         }
 
         // buf_y for x=0: physical row offset into window
-        let base_buf_y = (HEIGHT as i32 - 1 - gx - wy) as usize;
+        let base_buf_y_i = HEIGHT as i32 - 1 - gx - wy;
+        debug_assert!(base_buf_y_i >= 0, "blit_1bpp_270: base_buf_y underflow");
+        debug_assert!(gy + y0 as i32 >= wx, "blit_1bpp_270: buf_x underflow");
+        let base_buf_y = base_buf_y_i as usize;
 
         for y in y0..y1 {
             let row = offset + y * stride;

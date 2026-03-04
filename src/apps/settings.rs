@@ -269,8 +269,8 @@ impl App<AppId> for SettingsApp {
                 let old = self.selected;
                 self.selected = wrap_next(self.selected, NUM_ITEMS);
                 if self.selected != old {
-                    ctx.mark_dirty_immediate(self.row_region(old));
-                    ctx.mark_dirty_immediate(self.row_region(self.selected));
+                    ctx.mark_dirty(self.row_region(old));
+                    ctx.mark_dirty(self.row_region(self.selected));
                 }
                 Transition::None
             }
@@ -279,21 +279,21 @@ impl App<AppId> for SettingsApp {
                 let old = self.selected;
                 self.selected = wrap_prev(self.selected, NUM_ITEMS);
                 if self.selected != old {
-                    ctx.mark_dirty_immediate(self.row_region(old));
-                    ctx.mark_dirty_immediate(self.row_region(self.selected));
+                    ctx.mark_dirty(self.row_region(old));
+                    ctx.mark_dirty(self.row_region(self.selected));
                 }
                 Transition::None
             }
 
             ActionEvent::Press(Action::NextJump) | ActionEvent::Repeat(Action::NextJump) => {
                 self.increment();
-                ctx.mark_dirty_immediate(self.value_region(self.selected));
+                ctx.mark_dirty(self.value_region(self.selected));
                 Transition::None
             }
 
             ActionEvent::Press(Action::PrevJump) | ActionEvent::Repeat(Action::PrevJump) => {
                 self.decrement();
-                ctx.mark_dirty_immediate(self.value_region(self.selected));
+                ctx.mark_dirty(self.value_region(self.selected));
                 Transition::None
             }
 

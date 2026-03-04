@@ -94,12 +94,6 @@ pub struct FontSet {
     heading: &'static BitmapFont,
 }
 
-impl Default for FontSet {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl FontSet {
     fn from_fonts(
         regular: &'static BitmapFont,
@@ -164,10 +158,6 @@ impl FontSet {
                 &font_data::REGULAR_HEADING_SMALL,
             ),
         }
-    }
-
-    pub fn new() -> Self {
-        Self::for_size(1)
     }
 
     #[inline]

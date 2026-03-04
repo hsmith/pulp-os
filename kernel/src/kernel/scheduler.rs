@@ -1,18 +1,18 @@
 // scheduler: main event loop, render pipeline, housekeeping, sleep
 //
-// EPD and SD share a single SPI bus via CriticalSectionDevice.
+// EPD and SD share a single SPI bus via CriticalSectionDevice;
 // during normal operation, all SD I/O completes before render()
-// touches the EPD. during the DU/GC waveform (~400ms), the EPD
+// touches the EPD; during the DU/GC waveform (~400ms), the EPD
 // charge pump drives pixels with no SPI commands, so the bus is
-// free for SD I/O. busy_wait_with_background exploits this window
-// to run background caching and housekeeping during the waveform.
+// free for SD I/O - busy_wait_with_background exploits this
+// window to run background caching and housekeeping
 //
 // handle_input and poll_housekeeping are synchronous; they return
 // a bool flag when the caller should enter_sleep (which is async
-// because it renders a sleep screen via the EPD).
+// because it renders a sleep screen via the EPD)
 //
 // sd_card_sleep sends cmd0 before deep sleep to reduce sd card
-// idle current from ~150 µa to ~10 µa
+// idle current from ~150 uA to ~10 uA
 
 use embassy_futures::select::{Either, select};
 use embassy_time::{Duration, Ticker, with_timeout};
@@ -181,8 +181,8 @@ impl super::Kernel {
         false
     }
 
-    // returns true if idle sleep is due
-    fn poll_housekeeping<A: AppLayer>(&mut self, app_mgr: &A) -> bool {
+    // shared housekeeping body: battery, sd probe, bookmark flush, stats
+    fn poll_housekeeping_inner<A: AppLayer>(&mut self, app_mgr: &A) {
         if let Some(mv) = tasks::BATTERY_MV.try_take() {
             self.cached_battery_mv = mv;
         }
@@ -201,31 +201,17 @@ impl super::Kernel {
                 tasks::set_idle_timeout(app_mgr.system_settings().sleep_timeout);
             }
         }
+    }
 
+    // returns true if idle sleep is due
+    fn poll_housekeeping<A: AppLayer>(&mut self, app_mgr: &A) -> bool {
+        self.poll_housekeeping_inner(app_mgr);
         tasks::IDLE_SLEEP_DUE.try_take().is_some()
     }
 
-    // housekeeping without idle-sleep check; do not initiate sleep mid-refresh
+    // housekeeping without idle-sleep check; never sleep mid-refresh
     fn poll_housekeeping_waveform<A: AppLayer>(&mut self, app_mgr: &A) {
-        if let Some(mv) = tasks::BATTERY_MV.try_take() {
-            self.cached_battery_mv = mv;
-        }
-
-        if tasks::SD_CHECK_DUE.try_take().is_some() {
-            self.sd_ok = self.sd.probe_ok();
-        }
-
-        if tasks::BOOKMARK_FLUSH_DUE.try_take().is_some() && self.bm_cache.is_dirty() {
-            self.bm_cache.flush(&self.sd);
-        }
-
-        if tasks::STATUS_DUE.try_take().is_some() {
-            self.log_stats();
-            if app_mgr.settings_loaded() {
-                tasks::set_idle_timeout(app_mgr.system_settings().sleep_timeout);
-            }
-        }
-        // idle sleep not checked here; never sleep during a waveform
+        self.poll_housekeeping_inner(app_mgr);
     }
 
     // partial refreshes use DU waveform (~400 ms); after ghost_clear_every
@@ -330,6 +316,13 @@ impl super::Kernel {
     // no SPI commands are sent, so the bus is free for SD I/O.
     // is_busy() is a sync GPIO read; no epd borrow is held across
     // any .await point, so self is fully available for handle() etc.
+    //
+    // run_background is wrapped in select so input interrupts long
+    // background work (e.g. chapter caching). when the background
+    // future is dropped mid-stream, partial cache writes are safe
+    // because ch_cached stays false until the full write completes.
+    // the TICK_MS timeout ensures is_busy is re-checked regularly
+    // even during long background operations.
     async fn busy_wait_with_background<A: AppLayer>(
         &mut self,
         app_mgr: &mut A,
@@ -337,34 +330,37 @@ impl super::Kernel {
         let mut deferred: Option<Transition<A::Id>> = None;
 
         loop {
-            // sync gpio read; no borrow held after this line
             if !self.epd.is_busy() {
                 break;
             }
 
-            // wait up to TICK_MS for input; no epd borrow involved
-            let input_event = with_timeout(
-                Duration::from_millis(TICK_MS),
-                tasks::INPUT_EVENTS.receive(),
-            )
-            .await
-            .ok();
+            // run background, interruptible by input or tick timeout
+            let ev = {
+                let mut handle = self.handle();
+                match select(
+                    app_mgr.run_background(&mut handle),
+                    with_timeout(
+                        Duration::from_millis(TICK_MS),
+                        tasks::INPUT_EVENTS.receive(),
+                    ),
+                )
+                .await
+                {
+                    Either::First(()) => None,
+                    Either::Second(Ok(ev)) => Some(ev),
+                    Either::Second(Err(_)) => None,
+                }
+            };
 
-            if let Some(hw_event) = input_event {
+            if let Some(hw_event) = ev {
                 if !app_mgr.suppress_deferred_input() {
                     let t = app_mgr.dispatch_event(hw_event, &mut *self.bm_cache);
                     if t != Transition::None && deferred.is_none() {
                         deferred = Some(t);
                     }
                 }
-                continue;
             }
 
-            // timeout elapsed; spi bus is free during waveform
-            {
-                let mut handle = self.handle();
-                app_mgr.run_background(&mut handle).await;
-            }
             self.poll_housekeeping_waveform(app_mgr);
         }
 

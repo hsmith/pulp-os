@@ -1,6 +1,8 @@
 // app lifecycle manager: nav stack, dispatch, font propagation, draw
 //
 // all dispatch is static (monomorphized via with_app!); no dyn, no vtable
+// loading indicator is drawn between app content and overlays so it
+// sits on top of page content but under quick menu and button bumps
 
 use crate::apps::files::FilesApp;
 use crate::apps::home::HomeApp;
@@ -264,6 +266,7 @@ impl AppManager {
             }
 
             self.propagate_fonts();
+            self.launcher.ctx.clear_loading();
 
             if nav.to != AppId::Upload {
                 if nav.resume {
@@ -307,6 +310,19 @@ impl AppManager {
     pub fn draw(&self, strip: &mut StripBuffer) {
         let active = self.launcher.active();
         with_app_ref!(active, self, |app| app.draw(strip));
+
+        // loading indicator: after app content, before overlays
+        if self.launcher.ctx.loading_active() {
+            let region = self.launcher.ctx.loading_region();
+            if region.intersects(strip.logical_window()) {
+                crate::ui::draw_loading_indicator(
+                    strip,
+                    region,
+                    self.launcher.ctx.loading_msg(),
+                    self.launcher.ctx.loading_pct(),
+                );
+            }
+        }
 
         if self.quick_menu.open {
             self.quick_menu.draw(strip);

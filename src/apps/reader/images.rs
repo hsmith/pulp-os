@@ -3,8 +3,8 @@
 // scan_chapter_for_image is the shared core: reads chapter data in
 // chunks, finds IMG_REF markers, resolves paths, checks cache, and
 // either decodes inline (large images) or dispatches to the worker
-// (small images). both epub_find_and_dispatch_image (background scan)
-// and dispatch_one_image_in_chapter (nearby prefetch) call through it.
+// (small images); both epub_find_and_dispatch_image (background scan)
+// and dispatch_one_image_in_chapter (nearby prefetch) call through it
 
 extern crate alloc;
 

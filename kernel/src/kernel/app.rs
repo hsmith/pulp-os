@@ -1,4 +1,5 @@
-// app protocol: trait, context, transitions, redraw types, and coalescing
+// app protocol: trait, context, transitions, redraw types, coalescing,
+// and loading indicator state
 //
 // these types define the contract between the kernel scheduler and
 // the app layer. concrete apps implement the App trait; the kernel
@@ -9,8 +10,8 @@
 // it. the kernel never knows which specific apps exist.
 //
 // QuickAction types also live here -- they are pure data describing
-// what actions an app exposes. the renderer (QuickMenu widget) is
-// app-side, but the protocol is kernel-side.
+// what actions an app exposes; the renderer (QuickMenu widget) is
+// app-side, but the protocol is kernel-side
 
 use embassy_time::Instant;
 use esp_hal::delay::Delay;
@@ -72,10 +73,10 @@ impl QuickAction {
 
 pub const RECENT_FILE: &str = "RECENT";
 
-// distros define their own AppId enum and implement this trait.
+// distros define their own AppId enum and implement this trait
 // the kernel uses HOME to initialise the nav stack and reset on
-// Transition::Home. nothing else about the concrete variants is
-// known to the kernel.
+// Transition::Home; nothing else about the concrete variants is
+// known to the kernel
 
 pub trait AppIdType: Copy + Eq + core::fmt::Debug {
     const HOME: Self;
@@ -103,6 +104,7 @@ pub enum Redraw {
 }
 
 const MSG_BUF_SIZE: usize = 64;
+const LOADING_BUF_SIZE: usize = 32;
 
 pub struct AppContext {
     msg_buf: [u8; MSG_BUF_SIZE],
@@ -110,6 +112,16 @@ pub struct AppContext {
     redraw: Redraw,
     coalesce_until: Option<Instant>,
     immediate: bool,
+
+    // loading indicator; kernel-level so any app can use it.
+    // drawn by the app manager after app content, before overlays.
+    // uses the built-in mono font so it works even with no bitmap
+    // fonts loaded.
+    loading_buf: [u8; LOADING_BUF_SIZE],
+    loading_len: u8,
+    loading_pct: u8,
+    loading_active: bool,
+    loading_region: Region,
 }
 
 impl Default for AppContext {
@@ -126,6 +138,11 @@ impl AppContext {
             redraw: Redraw::None,
             coalesce_until: None,
             immediate: false,
+            loading_buf: [0u8; LOADING_BUF_SIZE],
+            loading_len: 0,
+            loading_pct: 0,
+            loading_active: false,
+            loading_region: Region::new(0, 0, 0, 0),
         }
     }
 
@@ -169,13 +186,6 @@ impl AppContext {
         self.coalesce_until = None;
     }
 
-    // alias; kept so callers in on_event that were already converted
-    // continue to compile without churn
-    #[inline]
-    pub fn mark_dirty_immediate(&mut self, region: Region) {
-        self.mark_dirty(region);
-    }
-
     // mark dirty with 50ms coalescing window; use only for background
     // batch updates (title scanner) where many rapid dirty marks
     // should coalesce into a single refresh
@@ -212,6 +222,54 @@ impl AppContext {
         self.coalesce_until = None;
         self.immediate = false;
         r
+    }
+
+    // loading indicator: set text and percentage.
+    // draws "msg...pct%" using the built-in mono font.
+    // region defines where it renders; typically just below the
+    // app header in the content area.
+    // auto-marks the region dirty so the next render shows it.
+    pub fn set_loading(&mut self, region: Region, msg: &str, pct: u8) {
+        let n = msg.len().min(LOADING_BUF_SIZE);
+        self.loading_buf[..n].copy_from_slice(&msg[..n].as_bytes()[..n]);
+        self.loading_len = n as u8;
+        self.loading_pct = pct.min(100);
+        self.loading_region = region;
+
+        self.loading_active = true;
+        self.mark_dirty(region);
+    }
+
+    // clear the loading indicator and mark its region dirty so
+    // the underlying content repaints
+    pub fn clear_loading(&mut self) {
+        if self.loading_active {
+            let region = self.loading_region;
+            self.loading_active = false;
+            self.loading_len = 0;
+            self.loading_pct = 0;
+            self.mark_dirty(region);
+        }
+    }
+
+    #[inline]
+    pub fn loading_active(&self) -> bool {
+        self.loading_active
+    }
+
+    #[inline]
+    pub fn loading_msg(&self) -> &str {
+        core::str::from_utf8(&self.loading_buf[..self.loading_len as usize]).unwrap_or("")
+    }
+
+    #[inline]
+    pub fn loading_pct(&self) -> u8 {
+        self.loading_pct
+    }
+
+    #[inline]
+    pub fn loading_region(&self) -> Region {
+        self.loading_region
     }
 }
 
@@ -351,11 +409,11 @@ impl<Id: AppIdType> Launcher<Id> {
     }
 }
 
-// aggregate interface the kernel scheduler calls on the app layer.
+// aggregate interface the kernel scheduler calls on the app layer
 // a distro implements this (typically via an AppManager struct that
-// holds concrete app types and a with_app! dispatch macro). the
+// holds concrete app types and a with_app! dispatch macro); the
 // scheduler is generic over AppLayer without importing any concrete
-// app types.
+// app types
 
 // run_special_mode is genuinely async (wifi radio); the rest is sync
 #[allow(async_fn_in_trait)]

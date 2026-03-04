@@ -1,5 +1,5 @@
-// battery voltage estimation --- generic over board calibration.
-// board-specific divider ratio and discharge curve live in board::battery.
+// battery voltage estimation, generic over board calibration
+// board-specific divider ratio and discharge curve live in board::battery
 
 use crate::board::battery::{DISCHARGE_CURVE, DIVIDER_MULT};
 

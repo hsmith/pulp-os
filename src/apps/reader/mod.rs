@@ -29,7 +29,7 @@ use crate::kernel::KernelHandle;
 use crate::kernel::QuickAction;
 use crate::kernel::bookmarks;
 use crate::kernel::work_queue;
-use crate::ui::{Alignment, BUTTON_BAR_H, CONTENT_TOP, Region, StackFmt, draw_progress_bar};
+use crate::ui::{Alignment, BUTTON_BAR_H, CONTENT_TOP, Region, StackFmt};
 use smol_epub::DecodedImage;
 use smol_epub::cache;
 use smol_epub::epub::{self, EpubMeta, EpubSpine, EpubToc, TocSource};
@@ -79,8 +79,7 @@ pub(super) const POSITION_OVERLAY: Region = Region::new(
     POSITION_OVERLAY_H,
 );
 
-pub(super) const LOADING_REGION: Region = Region::new(MARGIN, TEXT_Y, 464, 20);
-pub(super) const LOADING_BAR_REGION: Region = Region::new(MARGIN, TEXT_Y + 26, 200, 8);
+pub(super) const LOADING_REGION: Region = Region::new(MARGIN, TEXT_Y, 464, 18);
 
 pub const QA_FONT_SIZE: u8 = 1;
 pub(super) const QA_PREV_CHAPTER: u8 = 3;
@@ -101,21 +100,6 @@ pub(super) enum State {
     Ready,
     ShowToc,
     Error,
-}
-
-impl State {
-    pub(super) fn loading_pct(self) -> u8 {
-        match self {
-            Self::NeedBookmark => 0,
-            Self::NeedInit => 5,
-            Self::NeedOpf => 15,
-            Self::NeedToc => 30,
-            Self::NeedCache => 45,
-            Self::NeedIndex => 70,
-            Self::NeedPage => 90,
-            Self::Ready | Self::ShowToc | Self::Error => 100,
-        }
-    }
 }
 
 // background caching progress, runs independently of the reading
@@ -341,6 +325,33 @@ impl ReaderApp {
 
     pub fn has_bg_work(&self) -> bool {
         self.is_epub && self.bg_cache != BgCacheState::Idle
+    }
+
+    pub(super) fn cached_chapter_count(&self) -> usize {
+        let n = self.spine.len().min(cache::MAX_CACHE_CHAPTERS);
+        self.ch_cached[..n].iter().filter(|&&c| c).count()
+    }
+
+    // update the kernel loading indicator with current caching progress
+    fn set_cache_loading(&self, ctx: &mut AppContext) {
+        let cached = self.cached_chapter_count();
+        let total = self.spine.len();
+        let mut lbuf = StackFmt::<28>::new();
+        if matches!(
+            self.bg_cache,
+            BgCacheState::CacheChapter | BgCacheState::WaitNearbyImage
+        ) && cached < total
+        {
+            let _ = write!(lbuf, "Caching {}/{}", cached, total);
+        } else {
+            let _ = write!(lbuf, "Caching image(s)");
+        }
+        let pct = if total > 0 {
+            ((cached * 100) / total).min(100) as u8
+        } else {
+            100
+        };
+        ctx.set_loading(LOADING_REGION, lbuf.as_str(), pct);
     }
 
     // run one step of image work queue polling while suspended;
@@ -604,6 +615,7 @@ impl App<AppId> for ReaderApp {
 
         log::info!("reader: opening {}", self.name());
 
+        ctx.set_loading(LOADING_REGION, "Opening", 0);
         ctx.mark_dirty(PAGE_REGION);
     }
 
@@ -671,8 +683,10 @@ impl App<AppId> for ReaderApp {
                         self.chapters_cached = false;
                         self.goto_last_page = false;
                         self.state = State::NeedInit;
+                        ctx.set_loading(LOADING_REGION, "Loading", 10);
                     } else {
                         self.state = State::NeedPage;
+                        ctx.set_loading(LOADING_REGION, "Loading", 50);
                     }
                     continue;
                 }
@@ -680,12 +694,13 @@ impl App<AppId> for ReaderApp {
                 State::NeedInit => match self.epub_init_zip(k) {
                     Ok(()) => {
                         self.state = State::NeedOpf;
-                        ctx.mark_dirty(LOADING_BAR_REGION);
+                        ctx.set_loading(LOADING_REGION, "Loading", 25);
                     }
                     Err(e) => {
                         log::info!("reader: epub init (zip) failed: {}", e);
                         self.error = Some(e);
                         self.state = State::Error;
+                        ctx.clear_loading();
                         ctx.mark_dirty(PAGE_REGION);
                     }
                 },
@@ -693,12 +708,13 @@ impl App<AppId> for ReaderApp {
                 State::NeedOpf => match self.epub_init_opf(k) {
                     Ok(()) => {
                         self.state = State::NeedToc;
-                        ctx.mark_dirty(LOADING_BAR_REGION);
+                        ctx.set_loading(LOADING_REGION, "Loading", 40);
                     }
                     Err(e) => {
                         log::info!("reader: epub init (opf) failed: {}", e);
                         self.error = Some(e);
                         self.state = State::Error;
+                        ctx.clear_loading();
                         ctx.mark_dirty(PAGE_REGION);
                     }
                 },
@@ -739,17 +755,13 @@ impl App<AppId> for ReaderApp {
                     }
                     self.rebuild_quick_actions();
                     self.state = State::NeedCache;
-                    // break instead of continue so the progress bar
-                    // renders before potentially heavy chapter caching;
-                    // for cached books this mark coalesces with Ready
-                    // because both complete during the initial waveform
-                    ctx.mark_dirty(LOADING_BAR_REGION);
+                    ctx.set_loading(LOADING_REGION, "Caching", 55);
                 }
 
                 State::NeedCache => match self.epub_check_cache(k) {
                     Ok(true) => {
                         self.state = State::NeedIndex;
-                        continue;
+                        ctx.set_loading(LOADING_REGION, "Indexing", 75);
                     }
                     Ok(false) => {
                         // cache the current chapter; async version yields
@@ -771,12 +783,13 @@ impl App<AppId> for ReaderApp {
                                 }
 
                                 self.state = State::NeedIndex;
-                                continue;
+                                ctx.set_loading(LOADING_REGION, "Indexing", 75);
                             }
                             Err(e) => {
                                 log::info!("reader: cache ch{} failed: {}", ch, e);
                                 self.error = Some(e);
                                 self.state = State::Error;
+                                ctx.clear_loading();
                                 ctx.mark_dirty(PAGE_REGION);
                             }
                         }
@@ -785,6 +798,7 @@ impl App<AppId> for ReaderApp {
                         log::info!("reader: cache check failed: {}", e);
                         self.error = Some(e);
                         self.state = State::Error;
+                        ctx.clear_loading();
                         ctx.mark_dirty(PAGE_REGION);
                     }
                 },
@@ -805,6 +819,7 @@ impl App<AppId> for ReaderApp {
                         {
                             self.error = Some(e);
                             self.state = State::Error;
+                            ctx.clear_loading();
                             ctx.mark_dirty(PAGE_REGION);
                             break;
                         }
@@ -824,17 +839,19 @@ impl App<AppId> for ReaderApp {
                             Ok(()) => {
                                 self.defer_image_decode = false;
                                 self.state = State::Ready;
+                                ctx.clear_loading();
                                 ctx.mark_dirty(PAGE_REGION);
                             }
                             Err(e) => {
                                 self.error = Some(e);
                                 self.state = State::Error;
+                                ctx.clear_loading();
                                 ctx.mark_dirty(PAGE_REGION);
                             }
                         }
                     } else {
                         self.state = State::NeedPage;
-                        continue;
+                        ctx.set_loading(LOADING_REGION, "Loading page", 90);
                     }
                 }
 
@@ -847,6 +864,7 @@ impl App<AppId> for ReaderApp {
                                 Err(e) => {
                                     self.error = Some(e);
                                     self.state = State::Error;
+                                    ctx.clear_loading();
                                     ctx.mark_dirty(PAGE_REGION);
                                     break;
                                 }
@@ -862,6 +880,7 @@ impl App<AppId> for ReaderApp {
                         if self.state != State::Error {
                             self.defer_image_decode = false;
                             self.state = State::Ready;
+                            ctx.clear_loading();
                             ctx.mark_dirty(PAGE_REGION);
                         }
                     } else {
@@ -869,12 +888,14 @@ impl App<AppId> for ReaderApp {
                             Ok(()) => {
                                 self.defer_image_decode = false;
                                 self.state = State::Ready;
+                                ctx.clear_loading();
                                 ctx.mark_dirty(PAGE_REGION);
                             }
                             Err(e) => {
                                 log::info!("reader: load failed: {}", e);
                                 self.error = Some(e);
                                 self.state = State::Error;
+                                ctx.clear_loading();
                                 ctx.mark_dirty(PAGE_REGION);
                             }
                         }
@@ -897,7 +918,19 @@ impl App<AppId> for ReaderApp {
             State::Ready | State::ShowToc | State::NeedIndex | State::NeedPage
         ) && self.bg_cache != BgCacheState::Idle
         {
+            // ensure caching indicator is visible (covers resume
+            // and the transition from initial load to bg caching)
+            if !ctx.loading_active() {
+                self.set_cache_loading(ctx);
+            }
+            let prev_count = self.cached_chapter_count();
+            let prev_bg = self.bg_cache;
             self.bg_cache_step(k).await;
+            if self.bg_cache == BgCacheState::Idle {
+                ctx.clear_loading();
+            } else if self.cached_chapter_count() != prev_count || self.bg_cache != prev_bg {
+                self.set_cache_loading(ctx);
+            }
         }
     }
 
@@ -906,7 +939,7 @@ impl App<AppId> for ReaderApp {
             match event {
                 ActionEvent::Press(Action::Back) => {
                     self.state = State::Ready;
-                    ctx.mark_dirty_immediate(PAGE_REGION);
+                    ctx.mark_dirty(PAGE_REGION);
                     return Transition::None;
                 }
                 ActionEvent::Press(Action::Next) | ActionEvent::Repeat(Action::Next) => {
@@ -922,7 +955,7 @@ impl App<AppId> for ReaderApp {
                         if self.toc_selected >= self.toc_scroll + vis {
                             self.toc_scroll = self.toc_selected + 1 - vis;
                         }
-                        ctx.mark_dirty_immediate(PAGE_REGION);
+                        ctx.mark_dirty(PAGE_REGION);
                     }
                     return Transition::None;
                 }
@@ -941,7 +974,7 @@ impl App<AppId> for ReaderApp {
                         if self.toc_selected < self.toc_scroll {
                             self.toc_scroll = self.toc_selected;
                         }
-                        ctx.mark_dirty_immediate(PAGE_REGION);
+                        ctx.mark_dirty(PAGE_REGION);
                     }
                     return Transition::None;
                 }
@@ -957,14 +990,14 @@ impl App<AppId> for ReaderApp {
                         self.page = 0;
                         self.goto_last_page = false;
                         self.state = State::NeedIndex;
-                        ctx.mark_dirty_immediate(PAGE_REGION);
+                        ctx.mark_dirty(PAGE_REGION);
                     } else {
                         log::warn!(
                             "toc: entry \"{}\" unresolved (spine_idx=0xFFFF), ignoring",
                             entry.title_str()
                         );
                         self.state = State::Ready;
-                        ctx.mark_dirty_immediate(PAGE_REGION);
+                        ctx.mark_dirty(PAGE_REGION);
                     }
                     return Transition::None;
                 }
@@ -981,7 +1014,7 @@ impl App<AppId> for ReaderApp {
                     self.show_position = true;
                 }
                 if self.page_forward() {
-                    ctx.mark_dirty_immediate(PAGE_REGION);
+                    ctx.mark_dirty(PAGE_REGION);
                 }
                 Transition::None
             }
@@ -990,7 +1023,7 @@ impl App<AppId> for ReaderApp {
                     self.show_position = true;
                 }
                 if self.page_backward() {
-                    ctx.mark_dirty_immediate(PAGE_REGION);
+                    ctx.mark_dirty(PAGE_REGION);
                 }
                 Transition::None
             }
@@ -998,35 +1031,35 @@ impl App<AppId> for ReaderApp {
             ActionEvent::Release(Action::Next) | ActionEvent::Release(Action::Prev) => {
                 if self.show_position {
                     self.show_position = false;
-                    ctx.mark_dirty_immediate(POSITION_OVERLAY);
+                    ctx.mark_dirty(POSITION_OVERLAY);
                 }
                 Transition::None
             }
 
             ActionEvent::Press(Action::Next) | ActionEvent::Repeat(Action::Next) => {
                 if self.page_forward() {
-                    ctx.mark_dirty_immediate(PAGE_REGION);
+                    ctx.mark_dirty(PAGE_REGION);
                 }
                 Transition::None
             }
 
             ActionEvent::Press(Action::Prev) | ActionEvent::Repeat(Action::Prev) => {
                 if self.page_backward() {
-                    ctx.mark_dirty_immediate(PAGE_REGION);
+                    ctx.mark_dirty(PAGE_REGION);
                 }
                 Transition::None
             }
 
             ActionEvent::Press(Action::NextJump) | ActionEvent::Repeat(Action::NextJump) => {
                 if self.jump_forward() {
-                    ctx.mark_dirty_immediate(PAGE_REGION);
+                    ctx.mark_dirty(PAGE_REGION);
                 }
                 Transition::None
             }
 
             ActionEvent::Press(Action::PrevJump) | ActionEvent::Repeat(Action::PrevJump) => {
                 if self.jump_backward() {
-                    ctx.mark_dirty_immediate(PAGE_REGION);
+                    ctx.mark_dirty(PAGE_REGION);
                 }
                 Transition::None
             }
@@ -1123,7 +1156,7 @@ impl App<AppId> for ReaderApp {
         if self.state == State::ShowToc {
             draw_chrome_text(strip, STATUS_REGION, "Contents", Alignment::CenterRight, cf);
         } else if self.is_epub && !self.spine.is_empty() {
-            let mut sbuf = StackFmt::<32>::new();
+            let mut sbuf = StackFmt::<40>::new();
             if self.spine.len() > 1 {
                 if self.fully_indexed {
                     let _ = write!(
@@ -1149,7 +1182,13 @@ impl App<AppId> for ReaderApp {
                 let _ = write!(sbuf, "p{}", self.page + 1);
             }
             if self.bg_cache != BgCacheState::Idle {
-                let _ = write!(sbuf, " *");
+                let cached = self.cached_chapter_count();
+                let total = self.spine.len();
+                if cached < total {
+                    let _ = write!(sbuf, " [{}/{}]", cached, total);
+                } else {
+                    let _ = write!(sbuf, " [img]");
+                }
             }
             draw_chrome_text(
                 strip,
@@ -1187,31 +1226,10 @@ impl App<AppId> for ReaderApp {
             return;
         }
 
+        // loading states: the kernel loading indicator (drawn by
+        // AppManager) handles feedback text; nothing else to draw
         if self.state != State::Ready && self.state != State::Error && self.state != State::ShowToc
         {
-            let mut lbuf = StackFmt::<48>::new();
-            match self.state {
-                State::NeedCache => {
-                    let _ = write!(lbuf, "Preparing...");
-                }
-                State::NeedIndex => {
-                    let _ = write!(lbuf, "Indexing...");
-                }
-                State::NeedPage => {
-                    let _ = write!(lbuf, "Loading...");
-                }
-                _ => {
-                    let _ = write!(lbuf, "Loading...");
-                }
-            }
-            draw_chrome_text(
-                strip,
-                LOADING_REGION,
-                lbuf.as_str(),
-                Alignment::CenterLeft,
-                cf,
-            );
-            draw_progress_bar(strip, LOADING_BAR_REGION, self.state.loading_pct());
             return;
         }
 

@@ -71,7 +71,6 @@ pub struct InputDriver {
     press_since: Instant,
     long_press_fired: bool,
     last_repeat: Instant,
-    last_event_at: Instant,
     queue: EventQueue,
 }
 
@@ -86,18 +85,13 @@ impl InputDriver {
             press_since: now,
             long_press_fired: false,
             last_repeat: now,
-            last_event_at: now,
             queue: EventQueue::new(),
         }
     }
 
     pub fn poll(&mut self) -> Option<Event> {
         if !self.queue.is_empty() {
-            let ev = self.queue.pop();
-            if ev.is_some() {
-                self.last_event_at = Instant::now();
-            }
-            return ev;
+            return self.queue.pop();
         }
 
         let raw = self.read_raw();
@@ -125,11 +119,7 @@ impl InputDriver {
                 self.last_repeat = now;
             }
             self.stable = debounced;
-            let ev = self.queue.pop();
-            if ev.is_some() {
-                self.last_event_at = now;
-            }
-            return ev;
+            return self.queue.pop();
         }
 
         if let Some(btn) = self.stable {
@@ -138,23 +128,17 @@ impl InputDriver {
             if !self.long_press_fired && held >= Duration::from_millis(LONG_PRESS_MS) {
                 self.long_press_fired = true;
                 self.last_repeat = now;
-                self.last_event_at = now;
                 return Some(Event::LongPress(btn));
             }
 
             if self.long_press_fired && (now - self.last_repeat) >= Duration::from_millis(REPEAT_MS)
             {
                 self.last_repeat = now;
-                self.last_event_at = now;
                 return Some(Event::Repeat(btn));
             }
         }
 
         None
-    }
-
-    pub fn ms_since_last_event(&self) -> u64 {
-        (Instant::now() - self.last_event_at).as_millis()
     }
 
     fn read_raw(&mut self) -> Option<Button> {
