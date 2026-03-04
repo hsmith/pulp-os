@@ -1,12 +1,12 @@
 // boot console: accumulates text lines during hardware init, rendered
 // once to EPD before the app layer takes over
 //
-// uses the embedded-graphics built-in FONT_6X13 -- no TTF assets or
+// uses the embedded-graphics built-in FONT_9X18 -- no TTF assets or
 // build.rs font pipeline needed; the kernel can show boot progress
 // on a bare display with nothing but this mono font
 
 use embedded_graphics::mono_font::MonoTextStyle;
-use embedded_graphics::mono_font::ascii::FONT_6X13;
+use embedded_graphics::mono_font::ascii::FONT_9X18;
 use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::*;
 use embedded_graphics::text::Text;
@@ -17,7 +17,7 @@ const MAX_LINES: usize = 40;
 const MAX_LINE_LEN: usize = 76;
 const LEFT_MARGIN: i32 = 8;
 const TOP_MARGIN: i32 = 6;
-const LINE_H: i32 = 15;
+const LINE_H: i32 = 20;
 
 pub struct BootConsole {
     lines: [[u8; MAX_LINE_LEN]; MAX_LINES],
@@ -52,7 +52,7 @@ impl BootConsole {
     }
 
     pub fn draw(&self, strip: &mut StripBuffer) {
-        let style = MonoTextStyle::new(&FONT_6X13, BinaryColor::On);
+        let style = MonoTextStyle::new(&FONT_9X18, BinaryColor::On);
         for i in 0..self.count {
             let len = self.lengths[i] as usize;
             let text = core::str::from_utf8(&self.lines[i][..len]).unwrap_or("");

@@ -13,7 +13,7 @@ use alloc::vec::Vec;
 use core::fmt::Write;
 
 use embedded_graphics::mono_font::MonoTextStyle;
-use embedded_graphics::mono_font::ascii::FONT_6X13;
+use embedded_graphics::mono_font::ascii::FONT_9X18;
 use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
@@ -42,9 +42,9 @@ pub(super) const MARGIN: u16 = 8;
 pub(super) const HEADER_Y: u16 = CONTENT_TOP + 2;
 pub(super) const HEADER_H: u16 = 16;
 pub(super) const TEXT_Y: u16 = HEADER_Y + HEADER_H + 2;
-pub(super) const LINE_H: u16 = 13;
-pub(super) const CHARS_PER_LINE: usize = 66;
-pub(super) const LINES_PER_PAGE: usize = 58;
+pub(super) const LINE_H: u16 = 20;
+pub(super) const CHARS_PER_LINE: usize = 51;
+pub(super) const LINES_PER_PAGE: usize = 37;
 pub(super) const PAGE_BUF: usize = 8192;
 pub(super) const MAX_PAGES: usize = 1024;
 
@@ -79,7 +79,7 @@ pub(super) const POSITION_OVERLAY: Region = Region::new(
     POSITION_OVERLAY_H,
 );
 
-pub(super) const LOADING_REGION: Region = Region::new(MARGIN, TEXT_Y, 464, 18);
+pub(super) const LOADING_REGION: Region = Region::new(MARGIN, TEXT_Y, 464, 24);
 
 pub const QA_FONT_SIZE: u8 = 1;
 pub(super) const QA_PREV_CHAPTER: u8 = 3;
@@ -595,10 +595,10 @@ fn draw_chrome_text(
     if let Some(f) = font {
         f.draw_aligned(strip, region, text, align, BinaryColor::On);
     } else {
-        let tw = text.len() as u32 * 6;
-        let pos = align.position(region, embedded_graphics::geometry::Size::new(tw, 13));
-        let style = MonoTextStyle::new(&FONT_6X13, BinaryColor::On);
-        Text::new(text, Point::new(pos.x, pos.y + 13), style)
+        let tw = text.len() as u32 * 9;
+        let pos = align.position(region, embedded_graphics::geometry::Size::new(tw, 18));
+        let style = MonoTextStyle::new(&FONT_9X18, BinaryColor::On);
+        Text::new(text, Point::new(pos.x, pos.y + 18), style)
             .draw(strip)
             .unwrap();
     }
@@ -1297,7 +1297,7 @@ impl App<AppId> for ReaderApp {
                     font.draw_str_fg(strip, entry.title_str(), fg, cx, baseline);
                 }
             } else {
-                let style = MonoTextStyle::new(&FONT_6X13, BinaryColor::On);
+                let style = MonoTextStyle::new(&FONT_9X18, BinaryColor::On);
                 let vis_max = (TEXT_AREA_H / LINE_H) as usize;
                 let visible = vis_max.min(toc_len.saturating_sub(self.epub.toc_scroll));
                 for i in 0..visible {
@@ -1422,7 +1422,7 @@ impl App<AppId> for ReaderApp {
                 }
             }
         } else {
-            let style = MonoTextStyle::new(&FONT_6X13, BinaryColor::On);
+            let style = MonoTextStyle::new(&FONT_9X18, BinaryColor::On);
             for i in 0..self.pg.line_count {
                 let span = self.pg.lines[i];
                 let start = span.start as usize;
@@ -1499,10 +1499,10 @@ impl App<AppId> for ReaderApp {
                     BinaryColor::Off,
                 );
             } else {
-                let tw = text.len() as u32 * 6;
-                let pos = Alignment::Center.position(POSITION_OVERLAY, Size::new(tw, 13));
-                let style = MonoTextStyle::new(&FONT_6X13, BinaryColor::Off);
-                Text::new(text, Point::new(pos.x, pos.y + 13), style)
+                let tw = text.len() as u32 * 9;
+                let pos = Alignment::Center.position(POSITION_OVERLAY, Size::new(tw, 18));
+                let style = MonoTextStyle::new(&FONT_9X18, BinaryColor::Off);
+                Text::new(text, Point::new(pos.x, pos.y + 18), style)
                     .draw(strip)
                     .unwrap();
             }

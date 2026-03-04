@@ -71,6 +71,7 @@ pub struct InputDriver {
     press_since: Instant,
     long_press_fired: bool,
     last_repeat: Instant,
+    hold_consumed: bool,
     queue: EventQueue,
 }
 
@@ -85,15 +86,13 @@ impl InputDriver {
             press_since: now,
             long_press_fired: false,
             last_repeat: now,
+            hold_consumed: false,
             queue: EventQueue::new(),
         }
     }
 
     pub fn reset_hold_state(&mut self) {
-        let now = Instant::now();
-        self.press_since = now;
-        self.long_press_fired = false;
-        self.last_repeat = now;
+        self.hold_consumed = true;
     }
 
     pub fn poll(&mut self) -> Option<Event> {
@@ -105,6 +104,13 @@ impl InputDriver {
         let now = Instant::now();
 
         if raw != self.candidate {
+            // raw deviated from stable; restart hold timer so
+            // sub-debounce releases don't accumulate into LongPress
+            if self.stable.is_some() && raw != self.stable {
+                self.press_since = now;
+                self.long_press_fired = false;
+                self.last_repeat = now;
+            }
             self.candidate = raw;
             self.candidate_since = now;
         }
@@ -118,6 +124,7 @@ impl InputDriver {
         if debounced != self.stable {
             if let Some(old) = self.stable {
                 self.queue.push(Event::Release(old));
+                self.hold_consumed = false;
             }
             if let Some(new) = debounced {
                 self.queue.push(Event::Press(new));
@@ -130,18 +137,21 @@ impl InputDriver {
         }
 
         if let Some(btn) = self.stable {
-            let held = now - self.press_since;
+            if !self.hold_consumed {
+                let held = now - self.press_since;
 
-            if !self.long_press_fired && held >= Duration::from_millis(LONG_PRESS_MS) {
-                self.long_press_fired = true;
-                self.last_repeat = now;
-                return Some(Event::LongPress(btn));
-            }
+                if !self.long_press_fired && held >= Duration::from_millis(LONG_PRESS_MS) {
+                    self.long_press_fired = true;
+                    self.last_repeat = now;
+                    return Some(Event::LongPress(btn));
+                }
 
-            if self.long_press_fired && (now - self.last_repeat) >= Duration::from_millis(REPEAT_MS)
-            {
-                self.last_repeat = now;
-                return Some(Event::Repeat(btn));
+                if self.long_press_fired
+                    && (now - self.last_repeat) >= Duration::from_millis(REPEAT_MS)
+                {
+                    self.last_repeat = now;
+                    return Some(Event::Repeat(btn));
+                }
             }
         }
 

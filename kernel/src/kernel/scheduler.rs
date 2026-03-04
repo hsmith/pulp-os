@@ -168,14 +168,19 @@ impl super::Kernel {
     // if sleep_deep somehow returned; this version correctly returns
     // early so the caller can enter_sleep and continue the loop
     fn handle_input<A: AppLayer>(&mut self, hw_event: Event, app_mgr: &mut A) -> bool {
+        let _ = tasks::IDLE_SLEEP_DUE.try_take();
+
         if hw_event == Event::LongPress(Button::Power) {
             return true;
         }
 
+        let suppressed_before = app_mgr.suppress_deferred_input();
         let transition = app_mgr.dispatch_event(hw_event, &mut *self.bm_cache);
 
         if transition != Transition::None {
             app_mgr.apply_transition(transition, &mut self.handle());
+            tasks::request_hold_reset();
+        } else if app_mgr.suppress_deferred_input() != suppressed_before {
             tasks::request_hold_reset();
         }
 
@@ -325,8 +330,8 @@ impl super::Kernel {
     // the TICK_MS timeout ensures is_busy is re-checked regularly
     // even during long background operations.
     //
-    // first non-None transition wins; hold is reset so the held button
-    // doesn't re-fire LongPress/Repeat for the remainder of the waveform
+    // first non-None transition wins; hold reset prevents the held
+    // button from re-firing LongPress/Repeat for the waveform
     async fn busy_wait_with_background<A: AppLayer>(
         &mut self,
         app_mgr: &mut A,
@@ -357,10 +362,15 @@ impl super::Kernel {
             };
 
             if let Some(hw_event) = ev {
-                if !app_mgr.suppress_deferred_input() {
+                let _ = tasks::IDLE_SLEEP_DUE.try_take();
+
+                let suppressed_before = app_mgr.suppress_deferred_input();
+                if !suppressed_before {
                     let t = app_mgr.dispatch_event(hw_event, &mut *self.bm_cache);
                     if t != Transition::None && deferred.is_none() {
                         deferred = Some(t);
+                        tasks::request_hold_reset();
+                    } else if app_mgr.suppress_deferred_input() != suppressed_before {
                         tasks::request_hold_reset();
                     }
                 }
@@ -376,7 +386,7 @@ impl super::Kernel {
     // on real hardware this never returns (wake = full MCU reset)
     pub async fn enter_sleep(&mut self, reason: &str) {
         use embedded_graphics::mono_font::MonoTextStyle;
-        use embedded_graphics::mono_font::ascii::FONT_6X13;
+        use embedded_graphics::mono_font::ascii::FONT_9X18;
         use embedded_graphics::pixelcolor::BinaryColor;
         use embedded_graphics::prelude::*;
         use embedded_graphics::text::Text;
@@ -394,7 +404,7 @@ impl super::Kernel {
 
         self.epd
             .full_refresh_async(self.strip, &mut self.delay, &|s: &mut StripBuffer| {
-                let style = MonoTextStyle::new(&FONT_6X13, BinaryColor::On);
+                let style = MonoTextStyle::new(&FONT_9X18, BinaryColor::On);
                 let _ = Text::new("(sleep)", Point::new(210, 400), style).draw(s);
             })
             .await;
