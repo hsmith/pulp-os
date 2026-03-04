@@ -89,6 +89,13 @@ impl InputDriver {
         }
     }
 
+    pub fn reset_hold_state(&mut self) {
+        let now = Instant::now();
+        self.press_since = now;
+        self.long_press_fired = false;
+        self.last_repeat = now;
+    }
+
     pub fn poll(&mut self) -> Option<Event> {
         if !self.queue.is_empty() {
             return self.queue.pop();

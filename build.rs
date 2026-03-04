@@ -87,20 +87,20 @@ use std::path::{Path, PathBuf};
 
 // body sizes (px): 0=XSmall 1=Small 2=Medium 3=Large 4=XLarge
 const BODY_PX: [(f32, &str); 5] = [
-    (14.0, "XSMALL"),
-    (17.0, "SMALL"),
-    (21.0, "MEDIUM"),
-    (26.0, "LARGE"),
-    (32.0, "XLARGE"),
+    (16.0, "XSMALL"),
+    (19.0, "SMALL"),
+    (23.0, "MEDIUM"),
+    (28.0, "LARGE"),
+    (35.0, "XLARGE"),
 ];
 
 // Heading sizes scale proportionally
 const HEADING_PX: [(f32, &str); 5] = [
-    (19.0, "XSMALL"),
-    (23.0, "SMALL"),
-    (28.0, "MEDIUM"),
-    (34.0, "LARGE"),
-    (42.0, "XLARGE"),
+    (23.0, "XSMALL"),
+    (27.0, "SMALL"),
+    (32.0, "MEDIUM"),
+    (38.0, "LARGE"),
+    (46.0, "XLARGE"),
 ];
 
 // fontdue coverage threshold; values >= this become black

@@ -176,6 +176,7 @@ impl super::Kernel {
 
         if transition != Transition::None {
             app_mgr.apply_transition(transition, &mut self.handle());
+            tasks::request_hold_reset();
         }
 
         false
@@ -323,6 +324,9 @@ impl super::Kernel {
     // because ch_cached stays false until the full write completes.
     // the TICK_MS timeout ensures is_busy is re-checked regularly
     // even during long background operations.
+    //
+    // first non-None transition wins; hold is reset so the held button
+    // doesn't re-fire LongPress/Repeat for the remainder of the waveform
     async fn busy_wait_with_background<A: AppLayer>(
         &mut self,
         app_mgr: &mut A,
@@ -357,6 +361,7 @@ impl super::Kernel {
                     let t = app_mgr.dispatch_event(hw_event, &mut *self.bm_cache);
                     if t != Transition::None && deferred.is_none() {
                         deferred = Some(t);
+                        tasks::request_hold_reset();
                     }
                 }
             }

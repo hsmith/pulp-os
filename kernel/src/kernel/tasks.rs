@@ -12,6 +12,14 @@ pub const INPUT_CHANNEL_CAP: usize = 8;
 pub static INPUT_EVENTS: Channel<CriticalSectionRawMutex, Event, INPUT_CHANNEL_CAP> =
     Channel::new();
 
+// signal input_task to reset hold timers after a navigation event is consumed
+pub static RESET_HOLD: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+
+#[inline]
+pub fn request_hold_reset() {
+    RESET_HOLD.signal(());
+}
+
 pub static BATTERY_MV: Signal<CriticalSectionRawMutex, u16> = Signal::new();
 
 const BATTERY_INTERVAL_TICKS: u32 = 3000; // 3000 x 10 ms = 30 s
@@ -26,6 +34,10 @@ pub async fn input_task(mut input: InputDriver) -> ! {
 
     loop {
         ticker.next().await;
+
+        if RESET_HOLD.try_take().is_some() {
+            input.reset_hold_state();
+        }
 
         if let Some(ev) = input.poll() {
             let _ = INPUT_EVENTS.try_send(ev);
