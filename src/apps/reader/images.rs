@@ -41,19 +41,19 @@ impl ReaderApp {
         self.page_img = None;
         self.fullscreen_img = false;
 
-        if !self.is_epub || self.spine.is_empty() {
+        if !self.is_epub || self.epub.spine.is_empty() {
             return;
         }
 
         {
             let mut has_img = false;
             let mut has_text = false;
-            for i in 0..self.line_count {
-                if self.lines[i].is_image() {
-                    if self.lines[i].is_image_origin() {
+            for i in 0..self.pg.line_count {
+                if self.pg.lines[i].is_image() {
+                    if self.pg.lines[i].is_image_origin() {
                         has_img = true;
                     }
-                } else if self.lines[i].len > 0 {
+                } else if self.pg.lines[i].len > 0 {
                     has_text = true;
                 }
             }
@@ -63,13 +63,13 @@ impl ReaderApp {
         // copy src path to a local buf to avoid borrowing self.buf below
         let mut src_buf = [0u8; 128];
         let mut src_len = 0usize;
-        for i in 0..self.line_count {
-            if self.lines[i].is_image_origin() {
-                let start = self.lines[i].start as usize;
-                let len = self.lines[i].len as usize;
-                if start + len <= self.buf_len {
+        for i in 0..self.pg.line_count {
+            if self.pg.lines[i].is_image_origin() {
+                let start = self.pg.lines[i].start as usize;
+                let len = self.pg.lines[i].len as usize;
+                if start + len <= self.pg.buf_len {
                     let n = len.min(src_buf.len());
-                    src_buf[..n].copy_from_slice(&self.buf[start..start + n]);
+                    src_buf[..n].copy_from_slice(&self.pg.buf[start..start + n]);
                     src_len = n;
                 }
                 break;
@@ -87,8 +87,8 @@ impl ReaderApp {
 
         log::info!("reader: decoding image: {}", src_str);
 
-        let ch_zip_idx = self.spine.items[self.chapter as usize] as usize;
-        let ch_path = self.zip.entry_name(ch_zip_idx);
+        let ch_zip_idx = self.epub.spine.items[self.epub.chapter as usize] as usize;
+        let ch_path = self.epub.zip.entry_name(ch_zip_idx);
         let ch_dir = ch_path.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
 
         let mut path_buf = [0u8; 512];
@@ -98,7 +98,7 @@ impl ReaderApp {
             Err(_) => return,
         };
 
-        let dir_buf = self.cache_dir;
+        let dir_buf = self.epub.cache_dir;
         let dir = cache::dir_name_str(&dir_buf);
         let img_name = img_cache_name(cache::fnv1a(full_path.as_bytes()));
         let img_file = img_cache_str(&img_name);
@@ -128,9 +128,10 @@ impl ReaderApp {
         }
 
         let zip_idx = match self
+            .epub
             .zip
             .find(full_path)
-            .or_else(|| self.zip.find_icase(full_path))
+            .or_else(|| self.epub.zip.find_icase(full_path))
         {
             Some(idx) => idx,
             None => {
@@ -139,7 +140,7 @@ impl ReaderApp {
             }
         };
 
-        let entry = *self.zip.entry(zip_idx);
+        let entry = *self.epub.zip.entry(zip_idx);
         let (nb, nl) = self.name_copy();
         let epub_name = core::str::from_utf8(&nb[..nl]).unwrap_or("");
 
@@ -256,13 +257,13 @@ impl ReaderApp {
         // OOM fallback: release chapter cache and retry
         let result = match result {
             Ok(img) => Ok(img),
-            Err(e) if !self.ch_cache.is_empty() => {
+            Err(e) if !self.epub.ch_cache.is_empty() => {
                 log::info!(
                     "reader: decode failed ({}), releasing {} KB chapter cache and retrying",
                     e,
-                    self.ch_cache.len() / 1024,
+                    self.epub.ch_cache.len() / 1024,
                 );
-                self.ch_cache = Vec::new();
+                self.epub.ch_cache = Vec::new();
                 do_decode(k)
             }
             Err(e) => Err(e),
@@ -299,17 +300,17 @@ impl ReaderApp {
         ch: usize,
         start_offset: usize,
     ) -> crate::error::Result<ScanResult> {
-        if ch >= cache::MAX_CACHE_CHAPTERS || !self.ch_cached[ch] {
+        if ch >= cache::MAX_CACHE_CHAPTERS || !self.epub.ch_cached[ch] {
             return Ok(ScanResult::NoneFound);
         }
-        let ch_size = self.chapter_sizes[ch] as usize;
+        let ch_size = self.epub.chapter_sizes[ch] as usize;
         if ch_size == 0 {
             return Ok(ScanResult::NoneFound);
         }
 
-        self.prefetch_page = NO_PREFETCH;
+        self.pg.prefetch_page = NO_PREFETCH;
 
-        let dir_buf = self.cache_dir;
+        let dir_buf = self.epub.cache_dir;
         let dir = cache::dir_name_str(&dir_buf);
         let (nb, nl) = self.name_copy();
         let epub_name = core::str::from_utf8(&nb[..nl]).unwrap_or("");
@@ -324,7 +325,7 @@ impl ReaderApp {
                 dir,
                 ch_str,
                 offset as u32,
-                &mut self.prefetch[..read_len],
+                &mut self.pg.prefetch[..read_len],
             )?;
             if n == 0 {
                 break;
@@ -332,12 +333,12 @@ impl ReaderApp {
 
             let mut i = 0;
             while i + 2 < n {
-                if self.prefetch[i] != MARKER || self.prefetch[i + 1] != IMG_REF {
+                if self.pg.prefetch[i] != MARKER || self.pg.prefetch[i + 1] != IMG_REF {
                     i += 1;
                     continue;
                 }
 
-                let path_len = self.prefetch[i + 2] as usize;
+                let path_len = self.pg.prefetch[i + 2] as usize;
                 let path_start = i + 3;
                 if path_len == 0 || path_start + path_len > n {
                     i += 1;
@@ -346,7 +347,7 @@ impl ReaderApp {
 
                 let mut src_buf = [0u8; 128];
                 let src_n = path_len.min(src_buf.len());
-                src_buf[..src_n].copy_from_slice(&self.prefetch[path_start..path_start + src_n]);
+                src_buf[..src_n].copy_from_slice(&self.pg.prefetch[path_start..path_start + src_n]);
                 let src_str = match core::str::from_utf8(&src_buf[..src_n]) {
                     Ok(s) if !s.is_empty() => s,
                     _ => {
@@ -357,8 +358,8 @@ impl ReaderApp {
 
                 let mut path_buf = [0u8; 512];
                 let plen = {
-                    let ch_zip_idx = self.spine.items[ch] as usize;
-                    let ch_path = self.zip.entry_name(ch_zip_idx);
+                    let ch_zip_idx = self.epub.spine.items[ch] as usize;
+                    let ch_path = self.epub.zip.entry_name(ch_zip_idx);
                     let ch_dir = ch_path.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
                     epub::resolve_path(ch_dir, src_str, &mut path_buf)
                 };
@@ -392,9 +393,10 @@ impl ReaderApp {
                 }
 
                 let zip_idx = match self
+                    .epub
                     .zip
                     .find(full_path)
-                    .or_else(|| self.zip.find_icase(full_path))
+                    .or_else(|| self.epub.zip.find_icase(full_path))
                 {
                     Some(idx) => idx,
                     None => {
@@ -404,7 +406,7 @@ impl ReaderApp {
                     }
                 };
 
-                let entry = *self.zip.entry(zip_idx);
+                let entry = *self.epub.zip.entry(zip_idx);
 
                 // large images: decode via streaming SD reads on main loop
                 if entry.uncomp_size > PRECACHE_IMG_MAX {
@@ -450,7 +452,7 @@ impl ReaderApp {
                 }
 
                 // small images: extract to memory for worker dispatch
-                let data = match super::extract_zip_entry(k, epub_name, &self.zip, zip_idx) {
+                let data = match super::extract_zip_entry(k, epub_name, &self.epub.zip, zip_idx) {
                     Ok(d) => d,
                     Err(e) => {
                         log::warn!("precache: extract failed: {}", e);
@@ -469,7 +471,7 @@ impl ReaderApp {
                     max_w: TEXT_W as u16,
                     max_h: TEXT_AREA_H,
                 };
-                if work_queue::submit(self.work_gen, task) {
+                if work_queue::submit(self.epub.work_gen, task) {
                     return Ok(ScanResult::Dispatched {
                         resume_offset: resume,
                     });
@@ -492,44 +494,44 @@ impl ReaderApp {
     }
 
     // background image scanner: iterates across all chapters starting
-    // from self.img_cache_ch / self.img_cache_offset, wrapping around
+    // from self.epub.img_cache_ch / self.epub.img_cache_offset, wrapping around
     // to cover chapters before the reading position
     pub(super) fn epub_find_and_dispatch_image(
         &mut self,
         k: &mut KernelHandle<'_>,
     ) -> crate::error::Result<bool> {
-        let spine_len = self.spine.len();
+        let spine_len = self.epub.spine.len();
 
-        while (self.img_cache_ch as usize) < spine_len {
-            if self.img_scan_wrapped && self.img_cache_ch >= self.chapter {
+        while (self.epub.img_cache_ch as usize) < spine_len {
+            if self.epub.img_scan_wrapped && self.epub.img_cache_ch >= self.epub.chapter {
                 break;
             }
 
-            let ch = self.img_cache_ch as usize;
-            let start = self.img_cache_offset as usize;
+            let ch = self.epub.img_cache_ch as usize;
+            let start = self.epub.img_cache_offset as usize;
 
             match self.scan_chapter_for_image(k, ch, start)? {
                 ScanResult::Dispatched { resume_offset }
                 | ScanResult::DecodedInline { resume_offset } => {
-                    self.img_cache_offset = resume_offset;
+                    self.epub.img_cache_offset = resume_offset;
                     return Ok(true);
                 }
                 ScanResult::NoneFound => {
-                    self.img_cache_ch += 1;
-                    self.img_cache_offset = 0;
+                    self.epub.img_cache_ch += 1;
+                    self.epub.img_cache_offset = 0;
                 }
             }
         }
 
         // wrap around: if we started mid-book, scan chapters before the start
-        if !self.img_scan_wrapped && self.chapter > 0 {
+        if !self.epub.img_scan_wrapped && self.epub.chapter > 0 {
             log::info!(
                 "precache: wrapping image scan to ch0 (started at ch{})",
-                self.chapter,
+                self.epub.chapter,
             );
-            self.img_cache_ch = 0;
-            self.img_cache_offset = 0;
-            self.img_scan_wrapped = true;
+            self.epub.img_cache_ch = 0;
+            self.epub.img_cache_offset = 0;
+            self.epub.img_scan_wrapped = true;
             return Ok(true);
         }
 
@@ -550,7 +552,7 @@ impl ReaderApp {
 
         match result.outcome {
             work_queue::WorkOutcome::ImageReady { path_hash, image } => {
-                let dir_buf = self.cache_dir;
+                let dir_buf = self.epub.cache_dir;
                 let dir = cache::dir_name_str(&dir_buf);
                 let img_name = img_cache_name(path_hash);
                 let img_file = img_cache_str(&img_name);
@@ -590,10 +592,10 @@ impl ReaderApp {
 
     // dispatch one uncached image from chapters near the current position
     pub(super) fn try_dispatch_nearby_image(&mut self, k: &mut KernelHandle<'_>) -> bool {
-        let r = self.chapter as usize;
-        let spine_len = self.spine.len();
+        let r = self.epub.chapter as usize;
+        let spine_len = self.epub.spine.len();
         for &ch in &[r, r + 1, r.saturating_sub(1), r + 2, r.saturating_sub(2)] {
-            if ch < spine_len && self.ch_cached[ch] {
+            if ch < spine_len && self.epub.ch_cached[ch] {
                 if self.dispatch_one_image_in_chapter(k, ch) {
                     return true;
                 }

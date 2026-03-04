@@ -20,8 +20,8 @@ impl ReaderApp {
 
         if let Some(fs) = fonts_copy {
             let (c, count) =
-                wrap_proportional(&self.buf, n, &fs, &mut self.lines, self.max_lines, TEXT_W);
-            self.line_count = count;
+                wrap_proportional(&self.pg.buf, n, &fs, &mut self.pg.lines, self.max_lines, TEXT_W);
+            self.pg.line_count = count;
             c
         } else {
             self.wrap_monospace(n)
@@ -32,20 +32,20 @@ impl ReaderApp {
         use super::CHARS_PER_LINE;
 
         let max = self.max_lines;
-        self.line_count = 0;
+        self.pg.line_count = 0;
         let mut col: usize = 0;
         let mut line_start: usize = 0;
 
         for i in 0..n {
-            let b = self.buf[i];
+            let b = self.pg.buf[i];
             match b {
                 b'\r' => {}
                 b'\n' => {
-                    let end = trim_trailing_cr(&self.buf, line_start, i);
+                    let end = trim_trailing_cr(&self.pg.buf, line_start, i);
                     self.push_line(line_start, end);
                     line_start = i + 1;
                     col = 0;
-                    if self.line_count >= max {
+                    if self.pg.line_count >= max {
                         return line_start;
                     }
                 }
@@ -55,7 +55,7 @@ impl ReaderApp {
                         self.push_line(line_start, i + 1);
                         line_start = i + 1;
                         col = 0;
-                        if self.line_count >= max {
+                        if self.pg.line_count >= max {
                             return line_start;
                         }
                     }
@@ -63,8 +63,8 @@ impl ReaderApp {
             }
         }
 
-        if line_start < n && self.line_count < max {
-            let end = trim_trailing_cr(&self.buf, line_start, n);
+        if line_start < n && self.pg.line_count < max {
+            let end = trim_trailing_cr(&self.pg.buf, line_start, n);
             self.push_line(line_start, end);
         }
 
@@ -72,26 +72,26 @@ impl ReaderApp {
     }
 
     pub(super) fn push_line(&mut self, start: usize, end: usize) {
-        if self.line_count < LINES_PER_PAGE {
-            self.lines[self.line_count] = LineSpan {
+        if self.pg.line_count < LINES_PER_PAGE {
+            self.pg.lines[self.pg.line_count] = LineSpan {
                 start: start as u16,
                 len: (end - start) as u16,
                 flags: 0,
                 indent: 0,
             };
-            self.line_count += 1;
+            self.pg.line_count += 1;
         }
     }
 
     pub(super) fn reset_paging(&mut self) {
-        self.page = 0;
-        self.offsets[0] = 0;
-        self.total_pages = 1;
-        self.fully_indexed = false;
-        self.buf_len = 0;
-        self.line_count = 0;
-        self.prefetch_page = NO_PREFETCH;
-        self.prefetch_len = 0;
+        self.pg.page = 0;
+        self.pg.offsets[0] = 0;
+        self.pg.total_pages = 1;
+        self.pg.fully_indexed = false;
+        self.pg.buf_len = 0;
+        self.pg.line_count = 0;
+        self.pg.prefetch_page = NO_PREFETCH;
+        self.pg.prefetch_len = 0;
         self.page_img = None;
         self.fullscreen_img = false;
     }
@@ -100,16 +100,16 @@ impl ReaderApp {
         &mut self,
         k: &mut KernelHandle<'_>,
     ) -> crate::error::Result<()> {
-        if !self.ch_cache.is_empty() {
-            let start = (self.offsets[self.page] as usize).min(self.ch_cache.len());
-            let end = (start + PAGE_BUF).min(self.ch_cache.len());
+        if !self.epub.ch_cache.is_empty() {
+            let start = (self.pg.offsets[self.pg.page] as usize).min(self.epub.ch_cache.len());
+            let end = (start + PAGE_BUF).min(self.epub.ch_cache.len());
             let n = end - start;
             if n > 0 {
-                self.buf[..n].copy_from_slice(&self.ch_cache[start..end]);
+                self.pg.buf[..n].copy_from_slice(&self.epub.ch_cache[start..end]);
             }
-            self.buf_len = n;
-            self.prefetch_page = NO_PREFETCH;
-            self.prefetch_len = 0;
+            self.pg.buf_len = n;
+            self.pg.prefetch_page = NO_PREFETCH;
+            self.pg.prefetch_len = 0;
             self.wrap_lines_counted(n);
             self.decode_page_images(k);
             return Ok(());
@@ -118,74 +118,74 @@ impl ReaderApp {
         let (nb, nl) = self.name_copy();
         let name = core::str::from_utf8(&nb[..nl]).unwrap_or("");
 
-        if self.prefetch_page == self.page {
-            core::mem::swap(&mut self.buf, &mut self.prefetch);
-            self.buf_len = self.prefetch_len;
-            self.prefetch_page = NO_PREFETCH;
-            self.prefetch_len = 0;
-        } else if self.is_epub && self.chapters_cached {
-            let dir_buf = self.cache_dir;
+        if self.pg.prefetch_page == self.pg.page {
+            core::mem::swap(&mut self.pg.buf, &mut self.pg.prefetch);
+            self.pg.buf_len = self.pg.prefetch_len;
+            self.pg.prefetch_page = NO_PREFETCH;
+            self.pg.prefetch_len = 0;
+        } else if self.is_epub && self.epub.chapters_cached {
+            let dir_buf = self.epub.cache_dir;
             let dir = cache::dir_name_str(&dir_buf);
-            let ch_file = cache::chapter_file_name(self.chapter);
+            let ch_file = cache::chapter_file_name(self.epub.chapter);
             let ch_str = cache::chapter_file_str(&ch_file);
-            let n = k.read_app_subdir_chunk(dir, ch_str, self.offsets[self.page], &mut self.buf)?;
-            self.buf_len = n;
+            let n = k.read_app_subdir_chunk(dir, ch_str, self.pg.offsets[self.pg.page], &mut self.pg.buf)?;
+            self.pg.buf_len = n;
         } else if self.file_size == 0 {
-            let (size, n) = k.read_file_start(name, &mut self.buf)?;
+            let (size, n) = k.read_file_start(name, &mut self.pg.buf)?;
             self.file_size = size;
-            self.buf_len = n;
+            self.pg.buf_len = n;
             log::info!("reader: opened {} ({} bytes)", name, size);
 
             if size == 0 {
-                self.fully_indexed = true;
-                self.line_count = 0;
+                self.pg.fully_indexed = true;
+                self.pg.line_count = 0;
                 return Ok(());
             }
         } else {
-            let n = k.read_chunk(name, self.offsets[self.page], &mut self.buf)?;
-            self.buf_len = n;
+            let n = k.read_chunk(name, self.pg.offsets[self.pg.page], &mut self.pg.buf)?;
+            self.pg.buf_len = n;
         }
 
-        let consumed = self.wrap_lines_counted(self.buf_len);
-        let next_offset = self.offsets[self.page] + consumed as u32;
+        let consumed = self.wrap_lines_counted(self.pg.buf_len);
+        let next_offset = self.pg.offsets[self.pg.page] + consumed as u32;
 
-        if self.page + 1 >= self.total_pages && !self.fully_indexed {
-            if self.line_count >= self.max_lines && next_offset < self.file_size {
-                if self.total_pages < MAX_PAGES {
-                    self.offsets[self.total_pages] = next_offset;
-                    self.total_pages += 1;
+        if self.pg.page + 1 >= self.pg.total_pages && !self.pg.fully_indexed {
+            if self.pg.line_count >= self.max_lines && next_offset < self.file_size {
+                if self.pg.total_pages < MAX_PAGES {
+                    self.pg.offsets[self.pg.total_pages] = next_offset;
+                    self.pg.total_pages += 1;
                 } else {
-                    self.fully_indexed = true;
+                    self.pg.fully_indexed = true;
                 }
             } else {
-                self.fully_indexed = true;
+                self.pg.fully_indexed = true;
             }
         }
 
-        if self.page + 1 < self.total_pages {
-            let pf_offset = self.offsets[self.page + 1];
-            let pf_result = if self.is_epub && self.chapters_cached {
-                let dir_buf = self.cache_dir;
+        if self.pg.page + 1 < self.pg.total_pages {
+            let pf_offset = self.pg.offsets[self.pg.page + 1];
+            let pf_result = if self.is_epub && self.epub.chapters_cached {
+                let dir_buf = self.epub.cache_dir;
                 let dir = cache::dir_name_str(&dir_buf);
-                let ch_file = cache::chapter_file_name(self.chapter);
+                let ch_file = cache::chapter_file_name(self.epub.chapter);
                 let ch_str = cache::chapter_file_str(&ch_file);
-                k.read_app_subdir_chunk(dir, ch_str, pf_offset, &mut self.prefetch)
+                k.read_app_subdir_chunk(dir, ch_str, pf_offset, &mut self.pg.prefetch)
             } else {
-                k.read_chunk(name, pf_offset, &mut self.prefetch)
+                k.read_chunk(name, pf_offset, &mut self.pg.prefetch)
             };
             match pf_result {
                 Ok(n) => {
-                    self.prefetch_len = n;
-                    self.prefetch_page = self.page + 1;
+                    self.pg.prefetch_len = n;
+                    self.pg.prefetch_page = self.pg.page + 1;
                 }
                 Err(_) => {
-                    self.prefetch_page = NO_PREFETCH;
-                    self.prefetch_len = 0;
+                    self.pg.prefetch_page = NO_PREFETCH;
+                    self.pg.prefetch_len = 0;
                 }
             }
         } else {
-            self.prefetch_page = NO_PREFETCH;
-            self.prefetch_len = 0;
+            self.pg.prefetch_page = NO_PREFETCH;
+            self.pg.prefetch_len = 0;
         }
 
         self.decode_page_images(k);
@@ -193,54 +193,54 @@ impl ReaderApp {
     }
 
     pub(super) fn preindex_all_pages(&mut self) {
-        if self.ch_cache.is_empty() {
+        if self.epub.ch_cache.is_empty() {
             return;
         }
 
-        let total = self.ch_cache.len();
-        self.offsets[0] = 0;
-        self.total_pages = 1;
+        let total = self.epub.ch_cache.len();
+        self.pg.offsets[0] = 0;
+        self.pg.total_pages = 1;
 
         let mut offset = 0usize;
-        while offset < total && self.total_pages < MAX_PAGES {
+        while offset < total && self.pg.total_pages < MAX_PAGES {
             let end = (offset + PAGE_BUF).min(total);
             let n = end - offset;
-            self.buf[..n].copy_from_slice(&self.ch_cache[offset..end]);
-            self.buf_len = n;
+            self.pg.buf[..n].copy_from_slice(&self.epub.ch_cache[offset..end]);
+            self.pg.buf_len = n;
 
             let consumed = self.wrap_lines_counted(n);
             let next_offset = offset + consumed;
 
-            if self.line_count >= self.max_lines && next_offset < total {
-                self.offsets[self.total_pages] = next_offset as u32;
-                self.total_pages += 1;
+            if self.pg.line_count >= self.max_lines && next_offset < total {
+                self.pg.offsets[self.pg.total_pages] = next_offset as u32;
+                self.pg.total_pages += 1;
                 offset = next_offset;
             } else {
                 break;
             }
         }
 
-        self.fully_indexed = true;
-        log::info!("chapter pre-indexed: {} pages", self.total_pages);
+        self.pg.fully_indexed = true;
+        log::info!("chapter pre-indexed: {} pages", self.pg.total_pages);
     }
 
     pub(super) fn scan_to_last_page(
         &mut self,
         k: &mut KernelHandle<'_>,
     ) -> crate::error::Result<()> {
-        while !self.fully_indexed && self.total_pages < MAX_PAGES {
-            self.page = self.total_pages - 1;
+        while !self.pg.fully_indexed && self.pg.total_pages < MAX_PAGES {
+            self.pg.page = self.pg.total_pages - 1;
             self.load_and_prefetch(k)?;
-            if self.page + 1 < self.total_pages {
-                self.page += 1;
+            if self.pg.page + 1 < self.pg.total_pages {
+                self.pg.page += 1;
             } else {
                 break;
             }
         }
-        if self.total_pages > 0 {
-            self.page = self.total_pages - 1;
+        if self.pg.total_pages > 0 {
+            self.pg.page = self.pg.total_pages - 1;
         }
-        self.prefetch_page = NO_PREFETCH;
+        self.pg.prefetch_page = NO_PREFETCH;
         self.load_and_prefetch(k)
     }
 
@@ -249,14 +249,14 @@ impl ReaderApp {
             return false;
         }
 
-        if self.page + 1 < self.total_pages {
-            self.page += 1;
+        if self.pg.page + 1 < self.pg.total_pages {
+            self.pg.page += 1;
             self.state = State::NeedPage;
             return true;
         }
 
-        if self.is_epub && self.fully_indexed && (self.chapter as usize + 1) < self.spine.len() {
-            self.chapter += 1;
+        if self.is_epub && self.pg.fully_indexed && (self.epub.chapter as usize + 1) < self.epub.spine.len() {
+            self.epub.chapter += 1;
             self.goto_last_page = false;
             self.state = State::NeedIndex;
             return true;
@@ -270,14 +270,14 @@ impl ReaderApp {
             return false;
         }
 
-        if self.page > 0 {
-            self.page -= 1;
+        if self.pg.page > 0 {
+            self.pg.page -= 1;
             self.state = State::NeedPage;
             return true;
         }
 
-        if self.is_epub && self.chapter > 0 {
-            self.chapter -= 1;
+        if self.is_epub && self.epub.chapter > 0 {
+            self.epub.chapter -= 1;
             self.goto_last_page = true;
             self.state = State::NeedIndex;
             return true;
@@ -292,21 +292,21 @@ impl ReaderApp {
             return false;
         }
         if self.is_epub {
-            if (self.chapter as usize + 1) < self.spine.len() {
-                self.chapter += 1;
+            if (self.epub.chapter as usize + 1) < self.epub.spine.len() {
+                self.epub.chapter += 1;
                 self.goto_last_page = false;
                 self.state = State::NeedIndex;
                 return true;
             }
         } else {
-            let last = if self.total_pages > 0 {
-                self.total_pages - 1
+            let last = if self.pg.total_pages > 0 {
+                self.pg.total_pages - 1
             } else {
                 0
             };
-            let target = (self.page + 10).min(last);
-            if target != self.page {
-                self.page = target;
+            let target = (self.pg.page + 10).min(last);
+            if target != self.pg.page {
+                self.pg.page = target;
                 self.state = State::NeedPage;
                 return true;
             }
@@ -320,16 +320,16 @@ impl ReaderApp {
             return false;
         }
         if self.is_epub {
-            if self.chapter > 0 {
-                self.chapter -= 1;
+            if self.epub.chapter > 0 {
+                self.epub.chapter -= 1;
                 self.goto_last_page = false;
                 self.state = State::NeedIndex;
                 return true;
             }
         } else {
-            let target = self.page.saturating_sub(10);
-            if target != self.page {
-                self.page = target;
+            let target = self.pg.page.saturating_sub(10);
+            if target != self.pg.page {
+                self.pg.page = target;
                 self.state = State::NeedPage;
                 return true;
             }
