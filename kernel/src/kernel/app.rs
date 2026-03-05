@@ -210,7 +210,7 @@ impl AppContext {
             Redraw::None => false,
             Redraw::Full => true,
             Redraw::Partial(_) => {
-                self.immediate || self.coalesce_until.map_or(true, |t| Instant::now() >= t)
+                self.immediate || self.coalesce_until.is_none_or(|t| Instant::now() >= t)
             }
         }
     }
@@ -230,7 +230,7 @@ impl AppContext {
     // auto-marks the region dirty so the next render shows it.
     pub fn set_loading(&mut self, region: Region, msg: &str, pct: u8) {
         let n = msg.len().min(LOADING_BUF_SIZE);
-        self.loading_buf[..n].copy_from_slice(&msg[..n].as_bytes()[..n]);
+        self.loading_buf[..n].copy_from_slice(&msg.as_bytes()[..n]);
         self.loading_len = n as u8;
         self.loading_pct = pct.min(100);
         self.loading_region = region;
@@ -364,7 +364,7 @@ impl<Id: AppIdType> Launcher<Id> {
 
     // check if an app ID is anywhere in the stack
     pub fn contains(&self, id: Id) -> bool {
-        self.stack[..self.depth].iter().any(|&i| i == id)
+        self.stack[..self.depth].contains(&id)
     }
 
     // restore stack from saved session data
@@ -373,9 +373,9 @@ impl<Id: AppIdType> Launcher<Id> {
     where
         F: Fn(u8) -> Id,
     {
-        self.depth = depth.min(MAX_STACK_DEPTH).max(1);
-        for i in 0..self.depth {
-            self.stack[i] = convert(stack[i]);
+        self.depth = depth.clamp(1, MAX_STACK_DEPTH);
+        for (i, &raw) in stack.iter().enumerate().take(self.depth) {
+            self.stack[i] = convert(raw);
         }
     }
 

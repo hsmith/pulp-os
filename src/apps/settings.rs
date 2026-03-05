@@ -142,7 +142,7 @@ impl SettingsApp {
     fn visible_items(&self) -> usize {
         let avail = SCREEN_H.saturating_sub(self.items_top + BUTTON_BAR_H);
         let count = (avail / ROW_STRIDE) as usize;
-        count.max(1).min(NUM_ITEMS)
+        count.clamp(1, NUM_ITEMS)
     }
 
     // item labels and values:
@@ -423,10 +423,8 @@ impl App<AppId> for SettingsApp {
             return;
         }
 
-        if self.save_needed {
-            if self.save(k) {
-                self.save_needed = false;
-            }
+        if self.save_needed && self.save(k) {
+            self.save_needed = false;
         }
     }
 

@@ -446,10 +446,8 @@ impl super::Kernel {
                         if !power {
                             tasks::request_hold_reset();
                         }
-                    } else if app_mgr.suppress_deferred_input() != suppressed_before {
-                        if !power {
-                            tasks::request_hold_reset();
-                        }
+                    } else if app_mgr.suppress_deferred_input() != suppressed_before && !power {
+                        tasks::request_hold_reset();
                     }
                 }
             }

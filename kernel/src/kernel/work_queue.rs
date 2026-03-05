@@ -132,6 +132,14 @@ impl WorkResult {
 static WORK_IN: Channel<CriticalSectionRawMutex, WorkItem, 2> = Channel::new();
 static WORK_OUT: Channel<CriticalSectionRawMutex, WorkResult, 2> = Channel::new();
 
+// true if the input channel has room for at least one more item.
+// use before expensive extraction to avoid wasted work when the
+// worker hasn't consumed its previous item yet.
+#[inline]
+pub fn can_submit() -> bool {
+    !WORK_IN.is_full()
+}
+
 pub fn submit(generation: u16, task: WorkTask) -> bool {
     WORK_IN.try_send(WorkItem { generation, task }).is_ok()
 }

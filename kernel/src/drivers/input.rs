@@ -132,23 +132,23 @@ impl InputDriver {
             return self.queue.pop();
         }
 
-        if let Some(btn) = self.stable {
-            if !self.hold_consumed {
-                let held = now - self.press_since;
+        if let Some(btn) = self.stable
+            && !self.hold_consumed
+        {
+            let held = now - self.press_since;
 
-                if !self.long_press_fired && held >= Duration::from_millis(timing::LONG_PRESS_MS) {
-                    self.long_press_fired = true;
-                    self.last_repeat = now;
-                    log::info!("input: LongPress({:?}) after {}ms", btn, held.as_millis());
-                    return Some(Event::LongPress(btn));
-                }
+            if !self.long_press_fired && held >= Duration::from_millis(timing::LONG_PRESS_MS) {
+                self.long_press_fired = true;
+                self.last_repeat = now;
+                log::info!("input: LongPress({:?}) after {}ms", btn, held.as_millis());
+                return Some(Event::LongPress(btn));
+            }
 
-                if self.long_press_fired
-                    && (now - self.last_repeat) >= Duration::from_millis(timing::REPEAT_MS)
-                {
-                    self.last_repeat = now;
-                    return Some(Event::Repeat(btn));
-                }
+            if self.long_press_fired
+                && (now - self.last_repeat) >= Duration::from_millis(timing::REPEAT_MS)
+            {
+                self.last_repeat = now;
+                return Some(Event::Repeat(btn));
             }
         }
 

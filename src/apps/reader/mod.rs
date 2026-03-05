@@ -73,7 +73,24 @@ pub(super) const EOCD_TAIL: usize = 512;
 
 pub(super) const INDENT_PX: u32 = 24;
 
-pub(super) const IMAGE_DISPLAY_H: u16 = 200;
+// max inline images tracked per page buffer for dimension pre-scan
+pub(super) const MAX_IMAGES_PER_PAGE: usize = 8;
+
+// default image height budget (half text area) used when actual
+// dimensions are unavailable (e.g. uncached deflated images, or
+// during preindex_all_pages where no pre-scan runs)
+pub(super) const DEFAULT_IMG_H: u16 = 350;
+
+// inline images are capped at this fraction of the text area height.
+// keeps illustrations proportional to surrounding text, similar to
+// Kindle / Apple Books.  fullscreen images (sole content on a page)
+// are not affected — they use the full text_area_h budget.
+pub(super) const INLINE_IMG_MAX_PCT: u16 = 40;
+
+#[inline]
+pub(super) fn inline_img_max_h(text_area_h: u16) -> u16 {
+    ((text_area_h as u32 * INLINE_IMG_MAX_PCT as u32) / 100) as u16
+}
 
 pub(super) const CHAPTER_CACHE_MAX: usize = 98304;
 
@@ -311,6 +328,12 @@ pub struct ReaderApp {
     pub(super) text_area_h: u16, // height of text area (SCREEN_H - text_y - bottom_pad)
     pub(super) reading_theme_idx: u8,
 
+    // pre-scanned image heights for the current page buffer;
+    // populated before wrapping so the pager can reserve the exact
+    // number of lines each image needs at its natural aspect ratio
+    pub(super) img_heights: [u16; MAX_IMAGES_PER_PAGE],
+    pub(super) img_height_count: u8,
+
     pub(super) book_font_size_idx: u8,
     pub(super) applied_font_idx: u8,
 
@@ -353,6 +376,9 @@ impl ReaderApp {
             text_w: TEXT_W,
             text_area_h: TEXT_AREA_H,
             reading_theme_idx: 0,
+
+            img_heights: [0u16; MAX_IMAGES_PER_PAGE],
+            img_height_count: 0,
 
             book_font_size_idx: 0,
             applied_font_idx: 0,
@@ -1486,11 +1512,28 @@ impl App<AppId> for ReaderApp {
                             if let Some(ref img) = self.page_img {
                                 let img_x = self.text_margin as i32
                                     + ((self.text_w as i32 - img.width as i32) / 2).max(0);
-                                // clamp to remaining vertical space so images near
-                                // the bottom of a page are never cut off
+
+                                // count reserved image lines for vertical centering
+                                let mut img_line_count = 0i32;
+                                for j in i..self.pg.line_count {
+                                    if self.pg.lines[j].is_image() {
+                                        img_line_count += 1;
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                let reserved_h = img_line_count * line_h;
+
+                                // the image is already decoded at the correct
+                                // budget (inline or fullscreen); just clamp to
+                                // remaining vertical space as a safety net
                                 let space_below =
-                                    (self.text_area_h as i32 - i as i32 * line_h).max(0) as usize;
-                                let blit_h = (img.height as usize).min(space_below);
+                                    (self.text_area_h as i32 - i as i32 * line_h).max(0);
+                                let blit_h = (img.height as i32).min(space_below).max(0) as usize;
+
+                                // center vertically within reserved lines
+                                let y_offset = ((reserved_h - blit_h as i32) / 2).max(0);
+
                                 strip.blit_1bpp(
                                     &img.data,
                                     0,
@@ -1498,7 +1541,7 @@ impl App<AppId> for ReaderApp {
                                     blit_h,
                                     img.stride,
                                     img_x,
-                                    y_top,
+                                    y_top + y_offset,
                                     true,
                                 );
                                 img_rendered = true;

@@ -440,8 +440,7 @@ where
 
         let _ = socket.write_all(b"[").await;
         let mut json_buf = [0u8; 80]; // per-entry scratch: {"name":"XXXXXXXX.XXX","size":4294967295}
-        for i in 0..count {
-            let e = &entries[i];
+        for (i, e) in entries.iter().enumerate().take(count) {
             let name = e.name_str();
             let mut pos = 0usize;
             let prefix = b"{\"name\":\"";
