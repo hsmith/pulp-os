@@ -496,7 +496,7 @@ impl HomeApp {
             let mut cx = BM_MARGIN as i32;
 
             if entry.chapter > 0 {
-                let mut ch_buf = [0u8; 8];
+                let mut ch_buf = [0u8; 10];
                 let ch_len = fmt_chapter_prefix(&mut ch_buf, entry.chapter);
                 for &b in &ch_buf[..ch_len] {
                     cx += font.draw_char_fg(strip, byte_to_char(b), fg, cx, baseline) as i32;
@@ -509,11 +509,19 @@ impl HomeApp {
 }
 
 // format "Ch{N} " into buf (1-based), return byte count
-fn fmt_chapter_prefix(buf: &mut [u8; 8], chapter: u16) -> usize {
-    let n = chapter + 1;
+fn fmt_chapter_prefix(buf: &mut [u8; 10], chapter: u16) -> usize {
+    let n = chapter.saturating_add(1);
     buf[0] = b'C';
     buf[1] = b'h';
     let mut pos = 2;
+    if n >= 10000 {
+        buf[pos] = b'0' + ((n / 10000) % 10) as u8;
+        pos += 1;
+    }
+    if n >= 1000 {
+        buf[pos] = b'0' + ((n / 1000) % 10) as u8;
+        pos += 1;
+    }
     if n >= 100 {
         buf[pos] = b'0' + ((n / 100) % 10) as u8;
         pos += 1;

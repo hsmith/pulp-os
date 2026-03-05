@@ -34,6 +34,10 @@ pub fn fmt_position(buf: &mut [u8], current: usize, total: usize) -> usize {
     let mut pos = 0;
 
     // format current
+    if current >= 10000 {
+        buf[pos] = b'0' + ((current / 10000) % 10) as u8;
+        pos += 1;
+    }
     if current >= 1000 {
         buf[pos] = b'0' + ((current / 1000) % 10) as u8;
         pos += 1;
@@ -53,6 +57,10 @@ pub fn fmt_position(buf: &mut [u8], current: usize, total: usize) -> usize {
     pos += 1;
 
     // format total
+    if total >= 10000 {
+        buf[pos] = b'0' + ((total / 10000) % 10) as u8;
+        pos += 1;
+    }
     if total >= 1000 {
         buf[pos] = b'0' + ((total / 1000) % 10) as u8;
         pos += 1;
