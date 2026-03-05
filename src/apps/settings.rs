@@ -1,4 +1,13 @@
 // settings app UI; configuration types live in kernel::config
+//
+// settings items (6 total, all fit on one screen at default font):
+//   0: Sleep After    – power management
+//   1: Ghost Clear    – e-paper refresh interval
+//   2: Book Font      – reading font size
+//   3: UI Font        – chrome font size
+//   4: Reading Theme  – Compact / Default / Relaxed / Spacious
+//   5: Swap Buttons   – swap Back/OK with Left/Right for left-handed use
+
 use core::fmt::Write as _;
 
 use crate::apps::{App, AppContext, AppId, Transition};
@@ -10,13 +19,15 @@ use crate::fonts::max_size_idx;
 use crate::kernel::KernelHandle;
 use crate::kernel::config::{
     self, GHOST_CLEAR_STEP, MAX_GHOST_CLEAR, MAX_SLEEP_TIMEOUT, MIN_GHOST_CLEAR,
-    SLEEP_TIMEOUT_STEP, SystemSettings, WifiConfig, parse_settings_txt, write_settings_txt,
+    NUM_READING_THEMES, SLEEP_TIMEOUT_STEP, SystemSettings, WifiConfig, parse_settings_txt,
+    reading_theme, write_settings_txt,
 };
 use crate::ui::{
-    Alignment, BitmapLabel, CONTENT_TOP, FULL_CONTENT_W, LARGE_MARGIN, Region, SECTION_GAP,
-    StackFmt, TITLE_Y, wrap_next, wrap_prev,
+    Alignment, BUTTON_BAR_H, BitmapLabel, CONTENT_TOP, FULL_CONTENT_W, LARGE_MARGIN, Region,
+    SECTION_GAP, StackFmt, TITLE_Y, wrap_next, wrap_prev,
 };
 
+// layout constants
 const ROW_H: u16 = 40;
 const ROW_GAP: u16 = 6;
 const ROW_STRIDE: u16 = ROW_H + ROW_GAP;
@@ -25,9 +36,9 @@ const LABEL_X: u16 = LARGE_MARGIN;
 const LABEL_W: u16 = 160;
 const COL_GAP: u16 = 8;
 const VALUE_X: u16 = LABEL_X + LABEL_W + COL_GAP;
-const VALUE_W: u16 = FULL_CONTENT_W - LABEL_W - COL_GAP; // fills remaining width
+const VALUE_W: u16 = FULL_CONTENT_W - LABEL_W - COL_GAP;
 
-const NUM_ITEMS: usize = 4;
+const NUM_ITEMS: usize = 6;
 const HEADING_ITEMS_GAP: u16 = SECTION_GAP;
 
 impl Default for SettingsApp {
@@ -40,6 +51,7 @@ pub struct SettingsApp {
     settings: SystemSettings,
     wifi: WifiConfig,
     selected: usize,
+    scroll: usize,
     loaded: bool,
     save_needed: bool,
     ui_fonts: fonts::UiFonts,
@@ -53,6 +65,7 @@ impl SettingsApp {
             settings: SystemSettings::defaults(),
             wifi: WifiConfig::empty(),
             selected: 0,
+            scroll: 0,
             loaded: false,
             save_needed: false,
             ui_fonts: uf,
@@ -125,12 +138,23 @@ impl SettingsApp {
         }
     }
 
+    // visible items: how many rows fit between items_top and BUTTON_BAR_H
+    fn visible_items(&self) -> usize {
+        let avail = SCREEN_H.saturating_sub(self.items_top + BUTTON_BAR_H);
+        let count = (avail / ROW_STRIDE) as usize;
+        count.max(1).min(NUM_ITEMS)
+    }
+
+    // item labels and values:
+
     fn item_label(i: usize) -> &'static str {
         match i {
             0 => "Sleep After",
             1 => "Ghost Clear",
             2 => "Book Font",
             3 => "UI Font",
+            4 => "Theme",
+            5 => "Swap Buttons",
             _ => "",
         }
     }
@@ -162,9 +186,26 @@ impl SettingsApp {
                     fonts::font_size_name(self.settings.ui_font_size_idx)
                 );
             }
+            4 => {
+                let theme = reading_theme(self.settings.reading_theme);
+                let _ = write!(buf, "{}", theme.name);
+            }
+            5 => {
+                let _ = write!(
+                    buf,
+                    "{}",
+                    if self.settings.swap_buttons {
+                        "Yes"
+                    } else {
+                        "No"
+                    }
+                );
+            }
             _ => {}
         }
     }
+
+    // increment/decrement:
 
     fn increment(&mut self) {
         match self.selected {
@@ -191,6 +232,14 @@ impl SettingsApp {
                 if self.settings.ui_font_size_idx < max_size_idx() {
                     self.settings.ui_font_size_idx += 1;
                 }
+            }
+            4 => {
+                if self.settings.reading_theme < NUM_READING_THEMES - 1 {
+                    self.settings.reading_theme += 1;
+                }
+            }
+            5 => {
+                self.settings.swap_buttons = !self.settings.swap_buttons;
             }
             _ => return,
         }
@@ -222,38 +271,69 @@ impl SettingsApp {
                     self.settings.ui_font_size_idx -= 1;
                 }
             }
+            4 => {
+                if self.settings.reading_theme > 0 {
+                    self.settings.reading_theme -= 1;
+                }
+            }
+            5 => {
+                self.settings.swap_buttons = !self.settings.swap_buttons;
+            }
             _ => return,
         }
         self.save_needed = true;
     }
 
+    // scroll management:
+
+    fn scroll_into_view(&mut self) {
+        let vis = self.visible_items();
+        if self.selected < self.scroll {
+            self.scroll = self.selected;
+        } else if self.selected >= self.scroll + vis {
+            self.scroll = self.selected + 1 - vis;
+        }
+    }
+
+    // row region helpers (visible_idx = position on screen, 0 = first visible):
+
     #[inline]
-    fn label_region(&self, i: usize) -> Region {
+    fn label_region(&self, visible_idx: usize) -> Region {
         Region::new(
             LABEL_X,
-            self.items_top + i as u16 * ROW_STRIDE,
+            self.items_top + visible_idx as u16 * ROW_STRIDE,
             LABEL_W,
             ROW_H,
         )
     }
 
     #[inline]
-    fn value_region(&self, i: usize) -> Region {
+    fn value_region(&self, visible_idx: usize) -> Region {
         Region::new(
             VALUE_X,
-            self.items_top + i as u16 * ROW_STRIDE,
+            self.items_top + visible_idx as u16 * ROW_STRIDE,
             VALUE_W,
             ROW_H,
         )
     }
 
     #[inline]
-    fn row_region(&self, i: usize) -> Region {
+    fn row_region(&self, visible_idx: usize) -> Region {
         Region::new(
             LABEL_X,
-            self.items_top + i as u16 * ROW_STRIDE,
+            self.items_top + visible_idx as u16 * ROW_STRIDE,
             LABEL_W + COL_GAP + VALUE_W,
             ROW_H,
+        )
+    }
+
+    fn list_region(&self) -> Region {
+        let vis = self.visible_items();
+        Region::new(
+            LABEL_X,
+            self.items_top,
+            LABEL_W + COL_GAP + VALUE_W,
+            vis as u16 * ROW_STRIDE,
         )
     }
 }
@@ -261,6 +341,7 @@ impl SettingsApp {
 impl App<AppId> for SettingsApp {
     fn on_enter(&mut self, ctx: &mut AppContext, _k: &mut KernelHandle<'_>) {
         self.selected = 0;
+        self.scroll = 0;
         self.save_needed = false;
         ctx.mark_dirty(Region::new(
             0,
@@ -271,39 +352,63 @@ impl App<AppId> for SettingsApp {
     }
 
     fn on_event(&mut self, event: ActionEvent, ctx: &mut AppContext) -> Transition {
+        let vis = self.visible_items();
+
         match event {
             ActionEvent::Press(Action::Back) => Transition::Pop,
             ActionEvent::LongPress(Action::Back) => Transition::Home,
 
             ActionEvent::Press(Action::Next) => {
-                let old = self.selected;
+                let old_selected = self.selected;
+                let old_scroll = self.scroll;
                 self.selected = wrap_next(self.selected, NUM_ITEMS);
-                if self.selected != old {
-                    ctx.mark_dirty(self.row_region(old));
-                    ctx.mark_dirty(self.row_region(self.selected));
+                if self.selected < old_selected {
+                    self.scroll = 0;
+                } else {
+                    self.scroll_into_view();
+                }
+                if self.scroll != old_scroll {
+                    ctx.mark_dirty(self.list_region());
+                } else if self.selected != old_selected {
+                    let old_vis = old_selected - old_scroll;
+                    let new_vis = self.selected - self.scroll;
+                    ctx.mark_dirty(self.row_region(old_vis));
+                    ctx.mark_dirty(self.row_region(new_vis));
                 }
                 Transition::None
             }
 
             ActionEvent::Press(Action::Prev) => {
-                let old = self.selected;
+                let old_selected = self.selected;
+                let old_scroll = self.scroll;
                 self.selected = wrap_prev(self.selected, NUM_ITEMS);
-                if self.selected != old {
-                    ctx.mark_dirty(self.row_region(old));
-                    ctx.mark_dirty(self.row_region(self.selected));
+                if self.selected > old_selected {
+                    self.scroll = NUM_ITEMS.saturating_sub(vis);
+                } else {
+                    self.scroll_into_view();
+                }
+                if self.scroll != old_scroll {
+                    ctx.mark_dirty(self.list_region());
+                } else if self.selected != old_selected {
+                    let old_vis = old_selected - old_scroll;
+                    let new_vis = self.selected - self.scroll;
+                    ctx.mark_dirty(self.row_region(old_vis));
+                    ctx.mark_dirty(self.row_region(new_vis));
                 }
                 Transition::None
             }
 
             ActionEvent::Press(Action::NextJump) | ActionEvent::Repeat(Action::NextJump) => {
                 self.increment();
-                ctx.mark_dirty(self.value_region(self.selected));
+                let v = self.selected - self.scroll;
+                ctx.mark_dirty(self.value_region(v));
                 Transition::None
             }
 
             ActionEvent::Press(Action::PrevJump) | ActionEvent::Repeat(Action::PrevJump) => {
                 self.decrement();
-                ctx.mark_dirty(self.value_region(self.selected));
+                let v = self.selected - self.scroll;
+                ctx.mark_dirty(self.value_region(v));
                 Transition::None
             }
 
@@ -326,8 +431,13 @@ impl App<AppId> for SettingsApp {
     }
 
     fn draw(&self, strip: &mut StripBuffer) {
-        let title_region =
-            Region::new(LARGE_MARGIN, TITLE_Y, FULL_CONTENT_W, self.ui_fonts.heading.line_height);
+        // heading
+        let title_region = Region::new(
+            LARGE_MARGIN,
+            TITLE_Y,
+            FULL_CONTENT_W,
+            self.ui_fonts.heading.line_height,
+        );
         BitmapLabel::new(title_region, "Settings", self.ui_fonts.heading)
             .alignment(Alignment::CenterLeft)
             .draw(strip)
@@ -342,14 +452,18 @@ impl App<AppId> for SettingsApp {
             return;
         }
 
+        // draw visible settings rows
+        let vis = self.visible_items();
+        let visible_count = vis.min(NUM_ITEMS - self.scroll);
         let mut val_buf = StackFmt::<20>::new();
 
-        for i in 0..NUM_ITEMS {
-            let selected = i == self.selected;
+        for vi in 0..visible_count {
+            let item_idx = self.scroll + vi;
+            let selected = item_idx == self.selected;
 
             BitmapLabel::new(
-                self.label_region(i),
-                Self::item_label(i),
+                self.label_region(vi),
+                Self::item_label(item_idx),
                 self.ui_fonts.body,
             )
             .alignment(Alignment::CenterLeft)
@@ -357,8 +471,8 @@ impl App<AppId> for SettingsApp {
             .draw(strip)
             .unwrap();
 
-            self.format_value(i, &mut val_buf);
-            BitmapLabel::new(self.value_region(i), val_buf.as_str(), self.ui_fonts.body)
+            self.format_value(item_idx, &mut val_buf);
+            BitmapLabel::new(self.value_region(vi), val_buf.as_str(), self.ui_fonts.body)
                 .alignment(Alignment::Center)
                 .inverted(selected)
                 .draw(strip)

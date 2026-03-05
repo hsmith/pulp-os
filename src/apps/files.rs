@@ -105,7 +105,6 @@ impl FilesApp {
         self.total
     }
 
-    /// Restore files state from RTC session data
     pub fn restore_state(&mut self, scroll: usize, selected: usize, total: usize) {
         self.scroll = scroll;
         self.selected = selected;
@@ -344,12 +343,8 @@ impl App<AppId> for FilesApp {
     }
 
     fn draw(&self, strip: &mut StripBuffer) {
-        let header_region = Region::new(
-            LIST_X,
-            TITLE_Y,
-            HEADER_W,
-            self.ui_fonts.heading.line_height,
-        );
+        let header_region =
+            Region::new(LIST_X, TITLE_Y, HEADER_W, self.ui_fonts.heading.line_height);
         BitmapLabel::new(header_region, "Files", self.ui_fonts.heading)
             .alignment(Alignment::CenterLeft)
             .draw(strip)

@@ -1,3 +1,10 @@
+// button label overlay at screen edges
+//
+// renders action labels ("Back", "OK", "<<", ">>") near the
+// physical button positions so users know what each button does.
+// uses the shared ButtonMapper so labels update when buttons are
+// swapped via settings.
+
 use embedded_graphics::{pixelcolor::BinaryColor, prelude::*, primitives::PrimitiveStyle};
 
 use crate::board::action::{Action, ButtonMapper};
@@ -97,7 +104,7 @@ fn action_label(action: Action) -> &'static str {
 }
 
 pub struct ButtonFeedback {
-    mapper: ButtonMapper,
+    swap: bool,
     font: Option<&'static BitmapFont>,
 }
 
@@ -110,7 +117,7 @@ impl Default for ButtonFeedback {
 impl ButtonFeedback {
     pub const fn new() -> Self {
         Self {
-            mapper: ButtonMapper::new(),
+            swap: false,
             font: None,
         }
     }
@@ -119,8 +126,24 @@ impl ButtonFeedback {
         self.font = Some(font);
     }
 
+    pub fn set_swap(&mut self, swap: bool) -> bool {
+        if self.swap != swap {
+            self.swap = swap;
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn draw(&self, strip: &mut StripBuffer) {
         let font = self.font.unwrap_or(&font_data::REGULAR_BODY_SMALL);
+        let mapper = if self.swap {
+            let mut m = ButtonMapper::new();
+            m.set_swap(true);
+            m
+        } else {
+            ButtonMapper::new()
+        };
 
         for def in BUMPS.iter() {
             if def.edge != Edge::Bottom {
@@ -138,7 +161,7 @@ impl ButtonFeedback {
                 .draw(strip)
                 .unwrap();
 
-            let action = self.mapper.map_button(def.button);
+            let action = mapper.map_button(def.button);
             let label = action_label(action);
             if label.is_empty() {
                 continue;

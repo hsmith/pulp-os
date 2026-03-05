@@ -10,8 +10,8 @@ use crate::fonts;
 use crate::kernel::KernelHandle;
 
 use super::{
-    decode_utf8_char, LineSpan, ReaderApp, State, IMAGE_DISPLAY_H, INDENT_PX, LINES_PER_PAGE,
-    MAX_PAGES, NO_PREFETCH, PAGE_BUF, TEXT_W,
+    IMAGE_DISPLAY_H, INDENT_PX, LINES_PER_PAGE, LineSpan, MAX_PAGES, NO_PREFETCH, PAGE_BUF,
+    ReaderApp, State, decode_utf8_char,
 };
 
 impl ReaderApp {
@@ -25,7 +25,7 @@ impl ReaderApp {
                 &fs,
                 &mut self.pg.lines,
                 self.max_lines,
-                TEXT_W,
+                self.text_w,
             );
             self.pg.line_count = count;
             c
@@ -436,7 +436,8 @@ pub(super) fn wrap_proportional(
                     }
 
                     let line_h = fonts.line_height(fonts::Style::Regular);
-                    let img_lines = (IMAGE_DISPLAY_H / line_h).max(1) as usize;
+                    // ceiling division: ensure reserved lines fully cover IMAGE_DISPLAY_H
+                    let img_lines = ((IMAGE_DISPLAY_H + line_h - 1) / line_h).max(1) as usize;
 
                     if line_count < max_l {
                         lines[line_count] = LineSpan {

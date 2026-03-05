@@ -2,10 +2,7 @@
 
 use core::fmt::Write as _;
 
-use embedded_graphics::pixelcolor::BinaryColor;
-use embedded_graphics::prelude::*;
-use embedded_graphics::primitives::PrimitiveStyle;
-
+use crate::apps::widgets::selectable_row::draw_selection;
 use crate::apps::{App, AppContext, AppId, RECENT_FILE, Transition};
 use crate::board::action::{Action, ActionEvent};
 use crate::board::{SCREEN_H, SCREEN_W};
@@ -126,7 +123,7 @@ impl HomeApp {
         self.bm_scroll
     }
 
-    /// Restore home state from RTC session data
+    // restore home state from RTC session data
     pub fn restore_state(
         &mut self,
         state_id: u8,
@@ -493,21 +490,8 @@ impl HomeApp {
             let baseline = y_top + ascent;
             let selected = idx == self.bm_selected;
 
-            if selected {
-                embedded_graphics::primitives::Rectangle::new(
-                    Point::new(0, y_top),
-                    Size::new(SCREEN_W as u32, line_h as u32),
-                )
-                .into_styled(PrimitiveStyle::with_fill(BinaryColor::On))
-                .draw(strip)
-                .unwrap();
-            }
-
-            let fg = if selected {
-                BinaryColor::Off
-            } else {
-                BinaryColor::On
-            };
+            let row_region = Region::new(0, y_top as u16, SCREEN_W, line_h as u16);
+            let fg = draw_selection(strip, row_region, selected);
 
             let mut cx = BM_MARGIN as i32;
 

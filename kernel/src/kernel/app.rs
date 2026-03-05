@@ -194,8 +194,9 @@ impl AppContext {
         use super::timing;
         self.request_partial_redraw(region);
         if !self.immediate && self.coalesce_until.is_none() {
-            self.coalesce_until =
-                Some(Instant::now() + embassy_time::Duration::from_millis(timing::COALESCE_WINDOW_MS));
+            self.coalesce_until = Some(
+                Instant::now() + embassy_time::Duration::from_millis(timing::COALESCE_WINDOW_MS),
+            );
         }
     }
 
@@ -361,14 +362,13 @@ impl<Id: AppIdType> Launcher<Id> {
         self.stack[index]
     }
 
-    /// Check if an app ID is anywhere in the stack
+    // check if an app ID is anywhere in the stack
     pub fn contains(&self, id: Id) -> bool {
         self.stack[..self.depth].iter().any(|&i| i == id)
     }
 
-    /// Restore stack from saved session data
-    ///
-    /// The `convert` function maps u8 values to Id.
+    // restore stack from saved session data
+    // the `convert` function maps u8 values to Id.
     pub fn restore_stack<F>(&mut self, depth: usize, stack: &[u8], convert: F)
     where
         F: Fn(u8) -> Id,
@@ -479,7 +479,11 @@ pub trait AppLayer {
     // collect_session writes app state to the provided RtcSession struct
     // apply_session restores app state from RtcSession, returns true if successful
     fn collect_session(&self, session: &mut super::rtc_session::RtcSession);
-    fn apply_session(&mut self, session: &super::rtc_session::RtcSession, k: &mut KernelHandle<'_>) -> bool;
+    fn apply_session(
+        &mut self,
+        session: &super::rtc_session::RtcSession,
+        k: &mut KernelHandle<'_>,
+    ) -> bool;
 
     // true when the active app wants to take over the main loop
     // (e.g. wifi upload mode bypasses the normal event dispatch)

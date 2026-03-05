@@ -12,4 +12,8 @@ pub use pulp_kernel::ui::*;
 pub use crate::apps::widgets::QuickMenu;
 pub use crate::apps::widgets::bitmap_label::{BitmapDynLabel, BitmapLabel};
 pub use crate::apps::widgets::button_feedback::{BUTTON_BAR_H, ButtonFeedback};
+pub use crate::apps::widgets::list::ListSelection;
 pub use crate::apps::widgets::quick_menu;
+pub use crate::apps::widgets::selectable_row::{
+    draw_selection, draw_selection_if_visible, selection_fg,
+};

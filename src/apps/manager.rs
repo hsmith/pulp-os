@@ -160,6 +160,22 @@ impl AppManager {
     pub fn load_eager_settings(&mut self, k: &mut KernelHandle<'_>) {
         self.settings.load_eager(k);
         self.propagate_fonts();
+        self.sync_button_config();
+    }
+
+    // sync button mapper and label widget from settings
+    pub fn sync_button_config(&mut self) {
+        let swap = self.settings.system_settings().swap_buttons;
+        self.mapper.set_swap(swap);
+        if self.bumps.set_swap(swap) {
+            // labels changed, need to redraw the button bar
+            self.launcher.ctx.mark_dirty(crate::ui::Region::new(
+                0,
+                crate::board::SCREEN_H - crate::ui::BUTTON_BAR_H,
+                crate::board::SCREEN_W,
+                crate::ui::BUTTON_BAR_H,
+            ));
+        }
     }
 
     pub fn load_home_recent(&mut self, k: &mut KernelHandle<'_>) {
@@ -472,6 +488,9 @@ impl AppManager {
                 });
             }
         }
+
+        // sync button configuration from settings (may have changed)
+        self.sync_button_config();
     }
 
     pub fn draw(&self, strip: &mut StripBuffer) {
@@ -499,13 +518,16 @@ impl AppManager {
     }
 
     pub fn propagate_fonts(&mut self) {
-        let ui_idx = self.settings.system_settings().ui_font_size_idx;
-        let book_idx = self.settings.system_settings().book_font_size_idx;
+        let ss = self.settings.system_settings();
+        let ui_idx = ss.ui_font_size_idx;
+        let book_idx = ss.book_font_size_idx;
+        let theme_idx = ss.reading_theme;
 
         self.home.set_ui_font_size(ui_idx);
         self.files.set_ui_font_size(ui_idx);
         self.settings.set_ui_font_size(ui_idx);
         self.reader.set_book_font_size(book_idx);
+        self.reader.set_reading_theme(theme_idx);
 
         let chrome = fonts::chrome_font();
         self.reader.set_chrome_font(chrome);

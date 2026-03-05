@@ -144,10 +144,18 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
 
     kernel.boot(&mut app_mgr).await;
 
-    spawner.spawn(tasks::input_task(input)).expect("spawn input_task");
-    spawner.spawn(tasks::housekeeping_task()).expect("spawn housekeeping_task");
-    spawner.spawn(tasks::idle_timeout_task()).expect("spawn idle_timeout_task");
-    spawner.spawn(work_queue::worker_task()).expect("spawn worker_task");
+    spawner
+        .spawn(tasks::input_task(input))
+        .expect("spawn input_task");
+    spawner
+        .spawn(tasks::housekeeping_task())
+        .expect("spawn housekeeping_task");
+    spawner
+        .spawn(tasks::idle_timeout_task())
+        .expect("spawn idle_timeout_task");
+    spawner
+        .spawn(work_queue::worker_task())
+        .expect("spawn worker_task");
     info!("kernel ready.");
 
     kernel.run(&mut app_mgr).await

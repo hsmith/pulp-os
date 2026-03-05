@@ -31,7 +31,10 @@ use super::timing;
 
 #[inline]
 fn is_power_event(ev: Event) -> bool {
-    matches!(ev, Event::Press(Button::Power) | Event::Release(Button::Power))
+    matches!(
+        ev,
+        Event::Press(Button::Power) | Event::Release(Button::Power)
+    )
 }
 
 impl super::Kernel {

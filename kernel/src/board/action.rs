@@ -43,24 +43,61 @@ impl ActionEvent {
     }
 }
 
-// fixed portrait one-handed layout
+// portrait one-handed layout with optional button swap
+//
+// default layout (right-handed):
+//   bottom row: Back  Confirm(=Select)  Left(=PrevJump)  Right(=NextJump)
+//   side:       VolUp(=Prev)  VolDown(=Next)
+//
+// swapped layout (left-handed):
+//   bottom row: Left(=PrevJump)  Right(=NextJump)  Back  Confirm(=Select)
+//   this swaps the *physical roles* of Back<->Left and Confirm<->Right
+//   so the spatial position of Back/OK moves to the right side of the
+//   device where the left hand naturally rests.
+//   volume buttons are NOT swapped (up=prev, down=next always).
 #[derive(Default)]
-pub struct ButtonMapper;
+pub struct ButtonMapper {
+    swap_buttons: bool,
+}
 
 impl ButtonMapper {
     pub const fn new() -> Self {
-        Self
+        Self {
+            swap_buttons: false,
+        }
+    }
+
+    pub fn set_swap(&mut self, swap: bool) {
+        self.swap_buttons = swap;
+    }
+
+    pub fn is_swapped(&self) -> bool {
+        self.swap_buttons
     }
 
     pub fn map_button(&self, button: Button) -> Action {
-        match button {
-            Button::VolDown => Action::Next,
-            Button::VolUp => Action::Prev,
-            Button::Right => Action::NextJump,
-            Button::Left => Action::PrevJump,
-            Button::Confirm => Action::Select,
-            Button::Back => Action::Back,
-            Button::Power => Action::Menu,
+        if self.swap_buttons {
+            // swapped: Back<->Left, Confirm<->Right
+            match button {
+                Button::VolDown => Action::Next,
+                Button::VolUp => Action::Prev,
+                Button::Right => Action::Select,     // was NextJump
+                Button::Left => Action::Back,        // was PrevJump
+                Button::Confirm => Action::NextJump, // was Select
+                Button::Back => Action::PrevJump,    // was Back
+                Button::Power => Action::Menu,
+            }
+        } else {
+            // default right-handed layout
+            match button {
+                Button::VolDown => Action::Next,
+                Button::VolUp => Action::Prev,
+                Button::Right => Action::NextJump,
+                Button::Left => Action::PrevJump,
+                Button::Confirm => Action::Select,
+                Button::Back => Action::Back,
+                Button::Power => Action::Menu,
+            }
         }
     }
 

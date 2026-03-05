@@ -14,7 +14,7 @@ pub use button::{Button, ROW1_THRESHOLDS, ROW2_THRESHOLDS, decode_ladder};
 
 // logical screen size (portrait mode via 270-degree rotation of 800x480 panel)
 pub const SCREEN_W: u16 = HEIGHT; // 480
-pub const SCREEN_H: u16 = WIDTH;  // 800
+pub const SCREEN_H: u16 = WIDTH; // 800
 
 use core::cell::RefCell;
 

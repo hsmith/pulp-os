@@ -4,8 +4,8 @@
 
 use esp_hal::time::{Duration, Instant};
 
-use crate::board::button::{decode_ladder, Button, ROW1_THRESHOLDS, ROW2_THRESHOLDS};
 use crate::board::InputHw;
+use crate::board::button::{Button, ROW1_THRESHOLDS, ROW2_THRESHOLDS, decode_ladder};
 use crate::kernel::timing;
 
 macro_rules! read_averaged {

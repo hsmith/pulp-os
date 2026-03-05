@@ -147,7 +147,7 @@ where
         }
     }
 
-    /// write BW RAM with content, RED RAM with inverted content
+    // write BW RAM with content, RED RAM with inverted content
     #[allow(clippy::too_many_arguments)]
     fn write_region_strips_bw_inv_red<F>(
         &mut self,
@@ -355,8 +355,8 @@ where
         let _ = self.spi.write(data);
     }
 
-    /// Send data with each byte inverted, re-applying edge masks.
-    /// Uses a small batch buffer to amortize SPI call overhead.
+    // send data with each byte inverted, re-applying edge masks
+    // uses a small batch buffer to amortize SPI call overhead
     fn send_data_inverted(&mut self, data: &[u8], left_mask: u8, right_mask: u8, row_bytes: usize) {
         const BATCH_SIZE: usize = 64;
         let mut batch = [0u8; BATCH_SIZE];

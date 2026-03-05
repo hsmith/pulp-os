@@ -9,19 +9,17 @@
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
+use smol_epub::DecodedImage;
 use smol_epub::cache;
 use smol_epub::epub;
 use smol_epub::html_strip::{IMG_REF, MARKER};
 use smol_epub::zip::{self, ZipIndex};
-use smol_epub::DecodedImage;
 
 use crate::error::{Error, ErrorKind};
-use crate::kernel::work_queue;
 use crate::kernel::KernelHandle;
+use crate::kernel::work_queue;
 
-use super::{
-    ReaderApp, IMAGE_DISPLAY_H, NO_PREFETCH, PAGE_BUF, PRECACHE_IMG_MAX, TEXT_AREA_H, TEXT_W,
-};
+use super::{IMAGE_DISPLAY_H, NO_PREFETCH, PAGE_BUF, PRECACHE_IMG_MAX, ReaderApp};
 
 // result of scanning a chapter for the next uncached image
 enum ScanResult {
@@ -186,11 +184,12 @@ impl ReaderApp {
         }
 
         let img_max_h = if self.fullscreen_img {
-            TEXT_AREA_H
+            self.text_area_h
         } else {
             IMAGE_DISPLAY_H
         };
 
+        let img_max_w = self.text_w as u16;
         let do_decode = |k_ref: &mut KernelHandle<'_>| -> Result<DecodedImage, &'static str> {
             let k_cell = RefCell::new(k_ref);
             let read_err = |e: Error| -> &'static str { e.into() };
@@ -204,7 +203,7 @@ impl ReaderApp {
                     },
                     data_offset,
                     entry.uncomp_size,
-                    TEXT_W as u16,
+                    img_max_w,
                     img_max_h,
                 )
             } else if is_jpeg {
@@ -218,7 +217,7 @@ impl ReaderApp {
                     data_offset,
                     entry.comp_size,
                     entry.uncomp_size,
-                    TEXT_W as u16,
+                    img_max_w,
                     img_max_h,
                 )
             } else if entry.method == zip::METHOD_STORED {
@@ -231,7 +230,7 @@ impl ReaderApp {
                     },
                     data_offset,
                     entry.uncomp_size,
-                    TEXT_W as u16,
+                    img_max_w,
                     img_max_h,
                 )
             } else {
@@ -244,7 +243,7 @@ impl ReaderApp {
                     },
                     data_offset,
                     entry.comp_size,
-                    TEXT_W as u16,
+                    img_max_w,
                     img_max_h,
                 )
             }
@@ -421,8 +420,8 @@ impl ReaderApp {
                         epub_name,
                         &entry,
                         is_jpeg,
-                        TEXT_W as u16,
-                        TEXT_AREA_H,
+                        self.text_w as u16,
+                        self.text_area_h,
                     ) {
                         Ok(img) => {
                             log::info!(
@@ -469,8 +468,8 @@ impl ReaderApp {
                     path_hash,
                     data,
                     is_jpeg,
-                    max_w: TEXT_W as u16,
-                    max_h: TEXT_AREA_H,
+                    max_w: self.text_w as u16,
+                    max_h: self.text_area_h,
                 };
                 if work_queue::submit(self.epub.work_gen, task) {
                     return Ok(ScanResult::Dispatched {

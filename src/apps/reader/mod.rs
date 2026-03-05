@@ -36,6 +36,8 @@ use smol_epub::html_strip::{
 };
 use smol_epub::zip::{self, ZipIndex};
 
+// chrome margin: used for header, status, progress bar, loading indicator.
+// this never changes; only the text content area responds to the reading theme.
 pub(super) const MARGIN: u16 = 8;
 
 pub(super) const HEADER_Y: u16 = CONTENT_TOP + TITLE_Y_OFFSET - 2; // slightly tighter
@@ -78,10 +80,6 @@ pub(super) const CHAPTER_CACHE_MAX: usize = 98304;
 // images <= this size are dispatched to async worker for decoding;
 // images > this size are decoded on main loop via streaming SD reads
 pub(super) const PRECACHE_IMG_MAX: u32 = 30 * 1024;
-
-pub(super) const READER_PROGRESS_H: u16 = 2;
-pub(super) const PROGRESS_Y: u16 = SCREEN_H - READER_PROGRESS_H - 1;
-pub(super) const PROGRESS_W: u16 = SCREEN_W - 2 * MARGIN;
 
 const POSITION_OVERLAY_W: u16 = 280;
 const POSITION_OVERLAY_H: u16 = 40;
@@ -306,6 +304,13 @@ pub struct ReaderApp {
     pub(super) font_ascent: u16,
     pub(super) max_lines: usize,
 
+    // reading theme: runtime layout derived from READING_THEMES
+    pub(super) text_margin: u16, // horizontal margin for text content (from theme)
+    pub(super) text_y: u16,      // top of text area (TEXT_Y + theme vertical margin)
+    pub(super) text_w: u32,      // text content width (SCREEN_W - 2 * text_margin)
+    pub(super) text_area_h: u16, // height of text area (SCREEN_H - text_y - bottom_pad)
+    pub(super) reading_theme_idx: u8,
+
     pub(super) book_font_size_idx: u8,
     pub(super) applied_font_idx: u8,
 
@@ -343,6 +348,12 @@ impl ReaderApp {
             font_ascent: LINE_H,
             max_lines: LINES_PER_PAGE,
 
+            text_margin: MARGIN,
+            text_y: TEXT_Y,
+            text_w: TEXT_W,
+            text_area_h: TEXT_AREA_H,
+            reading_theme_idx: 0,
+
             book_font_size_idx: 0,
             applied_font_idx: 0,
 
@@ -358,6 +369,20 @@ impl ReaderApp {
         self.book_font_size_idx = idx;
         self.apply_font_metrics();
         self.rebuild_quick_actions();
+    }
+
+    pub fn set_reading_theme(&mut self, idx: u8) {
+        self.reading_theme_idx = idx;
+        self.apply_theme_layout();
+        self.apply_font_metrics();
+    }
+
+    fn apply_theme_layout(&mut self) {
+        let theme = crate::kernel::config::reading_theme(self.reading_theme_idx);
+        self.text_margin = theme.margin_h;
+        self.text_y = TEXT_Y + theme.margin_v;
+        self.text_w = (SCREEN_W - 2 * self.text_margin) as u32;
+        self.text_area_h = SCREEN_H.saturating_sub(self.text_y + 4);
     }
 
     pub fn set_chrome_font(&mut self, font: &'static BitmapFont) {
@@ -464,17 +489,25 @@ impl ReaderApp {
         self.font_ascent = LINE_H;
         self.max_lines = LINES_PER_PAGE;
 
+        let theme = crate::kernel::config::reading_theme(self.reading_theme_idx);
+        let spacing_pct = theme.line_spacing_pct;
+
         if fonts::font_data::HAS_REGULAR {
             let fs = fonts::FontSet::for_size(self.book_font_size_idx);
-            self.font_line_h = fs.line_height(fonts::Style::Regular).max(1);
+            let native_h = fs.line_height(fonts::Style::Regular).max(1);
+            // apply line spacing: scale native line height by theme percentage
+            self.font_line_h = ((native_h as u32 * spacing_pct as u32) / 100).max(1) as u16;
             self.font_ascent = fs.ascent(fonts::Style::Regular);
-            self.max_lines = ((TEXT_AREA_H / self.font_line_h) as usize).min(LINES_PER_PAGE);
+            self.max_lines = ((self.text_area_h / self.font_line_h) as usize).min(LINES_PER_PAGE);
             log::info!(
-                "font: size_idx={} line_h={} ascent={} max_lines={}",
+                "font: size_idx={} line_h={} (native {} x {}%) ascent={} max_lines={} margin={}",
                 self.book_font_size_idx,
                 self.font_line_h,
+                native_h,
+                spacing_pct,
                 self.font_ascent,
-                self.max_lines
+                self.max_lines,
+                self.text_margin,
             );
             self.fonts = Some(fs);
         }
@@ -531,7 +564,6 @@ impl ReaderApp {
         self.book_font_size_idx
     }
 
-    /// Restore reader state from RTC session data
     pub fn restore_state(
         &mut self,
         filename: &[u8],
@@ -721,6 +753,7 @@ impl App<AppId> for ReaderApp {
 
         self.is_epub = epub::is_epub_filename(self.name());
         self.rebuild_quick_actions();
+        self.apply_theme_layout();
         self.reset_paging();
         self.epub.ch_cache = Vec::new();
         self.file_size = 0;
@@ -776,6 +809,9 @@ impl App<AppId> for ReaderApp {
         if self.epub.work_gen != 0 {
             work_queue::set_active_generation(self.epub.work_gen);
         }
+
+        // re-derive text area geometry from the (possibly changed) theme
+        self.apply_theme_layout();
 
         let font_changed = self.book_font_size_idx != self.applied_font_idx;
         self.apply_font_metrics();
@@ -1052,7 +1088,7 @@ impl App<AppId> for ReaderApp {
                             self.epub.toc_selected = 0;
                             self.epub.toc_scroll = 0;
                         }
-                        let vis = (TEXT_AREA_H / self.font_line_h) as usize;
+                        let vis = (self.text_area_h / self.font_line_h) as usize;
                         if self.epub.toc_selected >= self.epub.toc_scroll + vis {
                             self.epub.toc_scroll = self.epub.toc_selected + 1 - vis;
                         }
@@ -1067,7 +1103,7 @@ impl App<AppId> for ReaderApp {
                             self.epub.toc_selected -= 1;
                         } else {
                             self.epub.toc_selected = len - 1;
-                            let vis = (TEXT_AREA_H / self.font_line_h) as usize;
+                            let vis = (self.text_area_h / self.font_line_h) as usize;
                             if self.epub.toc_selected >= vis {
                                 self.epub.toc_scroll = self.epub.toc_selected + 1 - vis;
                             }
@@ -1165,6 +1201,26 @@ impl App<AppId> for ReaderApp {
                 Transition::None
             }
 
+            // LongPress(NextJump): jump to end of current chapter
+            ActionEvent::LongPress(Action::NextJump) => {
+                if self.state == State::Ready && self.pg.total_pages > 0 {
+                    self.pg.page = self.pg.total_pages - 1;
+                    ctx.mark_dirty(PAGE_REGION);
+                }
+                Transition::None
+            }
+
+            // LongPress(PrevJump): jump to start of current chapter
+            ActionEvent::LongPress(Action::PrevJump) => {
+                if self.state == State::Ready {
+                    self.pg.page = 0;
+                    ctx.mark_dirty(PAGE_REGION);
+                }
+                Transition::None
+            }
+
+            // LongPress(Select): reserved for bookmark toggle (Phase 6)
+            // ActionEvent::LongPress(Action::Select) => { ... }
             _ => Transition::None,
         }
     }
@@ -1197,7 +1253,7 @@ impl App<AppId> for ReaderApp {
                     for i in 0..self.epub.toc.len() {
                         if self.epub.toc.entries[i].spine_idx == self.epub.chapter {
                             self.epub.toc_selected = i;
-                            let vis = (TEXT_AREA_H / self.font_line_h) as usize;
+                            let vis = (self.text_area_h / self.font_line_h) as usize;
                             if self.epub.toc_selected >= vis {
                                 self.epub.toc_scroll = self.epub.toc_selected + 1 - vis;
                             }
@@ -1336,16 +1392,18 @@ impl App<AppId> for ReaderApp {
 
         if self.state == State::ShowToc {
             let toc_len = self.epub.toc.len();
+            let tx = self.text_margin as i32;
+            let ty = self.text_y as i32;
             if self.fonts.is_some() {
                 let font = fonts::body_font(self.book_font_size_idx);
                 let line_h = font.line_height as i32;
                 let ascent = font.ascent as i32;
-                let vis_max = (TEXT_AREA_H / font.line_height) as usize;
+                let vis_max = (self.text_area_h / font.line_height) as usize;
                 let visible = vis_max.min(toc_len.saturating_sub(self.epub.toc_scroll));
                 for i in 0..visible {
                     let idx = self.epub.toc_scroll + i;
                     let entry = &self.epub.toc.entries[idx];
-                    let y_top = TEXT_Y as i32 + i as i32 * line_h;
+                    let y_top = ty + i as i32 * line_h;
                     let baseline = y_top + ascent;
                     let selected = idx == self.epub.toc_selected;
 
@@ -1364,7 +1422,7 @@ impl App<AppId> for ReaderApp {
                     } else {
                         BinaryColor::On
                     };
-                    let mut cx = MARGIN as i32;
+                    let mut cx = tx;
                     if entry.spine_idx != 0xFFFF && entry.spine_idx == self.epub.chapter {
                         cx += font.draw_char_fg(strip, '>', fg, cx, baseline) as i32;
                         cx += font.draw_char_fg(strip, ' ', fg, cx, baseline) as i32;
@@ -1373,12 +1431,12 @@ impl App<AppId> for ReaderApp {
                 }
             } else {
                 let style = MonoTextStyle::new(&FONT_9X18, BinaryColor::On);
-                let vis_max = (TEXT_AREA_H / LINE_H) as usize;
+                let vis_max = (self.text_area_h / LINE_H) as usize;
                 let visible = vis_max.min(toc_len.saturating_sub(self.epub.toc_scroll));
                 for i in 0..visible {
                     let idx = self.epub.toc_scroll + i;
                     let entry = &self.epub.toc.entries[idx];
-                    let y = TEXT_Y as i32 + i as i32 * LINE_H as i32 + LINE_H as i32;
+                    let y = ty + i as i32 * LINE_H as i32 + LINE_H as i32;
                     let marker = if idx == self.epub.toc_selected {
                         "> "
                     } else {
@@ -1387,7 +1445,7 @@ impl App<AppId> for ReaderApp {
                     Text::new(marker, Point::new(0, y), style)
                         .draw(strip)
                         .unwrap();
-                    Text::new(entry.title_str(), Point::new(MARGIN as i32, y), style)
+                    Text::new(entry.title_str(), Point::new(tx, y), style)
                         .draw(strip)
                         .unwrap();
                 }
@@ -1402,9 +1460,10 @@ impl App<AppId> for ReaderApp {
             // fullscreen image: centre in text area, skip normal line layout
             if self.fullscreen_img {
                 if let Some(ref img) = self.page_img {
-                    let img_x = MARGIN as i32 + ((TEXT_W as i32 - img.width as i32) / 2).max(0);
-                    let img_y =
-                        TEXT_Y as i32 + ((TEXT_AREA_H as i32 - img.height as i32) / 2).max(0);
+                    let img_x = self.text_margin as i32
+                        + ((self.text_w as i32 - img.width as i32) / 2).max(0);
+                    let img_y = self.text_y as i32
+                        + ((self.text_area_h as i32 - img.height as i32) / 2).max(0);
                     strip.blit_1bpp(
                         &img.data,
                         0,
@@ -1423,11 +1482,15 @@ impl App<AppId> for ReaderApp {
 
                     if span.is_image() {
                         if span.is_image_origin() && !img_rendered {
-                            let y_top = TEXT_Y as i32 + i as i32 * line_h;
+                            let y_top = self.text_y as i32 + i as i32 * line_h;
                             if let Some(ref img) = self.page_img {
-                                let img_x =
-                                    MARGIN as i32 + ((TEXT_W as i32 - img.width as i32) / 2).max(0);
-                                let blit_h = (img.height as usize).min(IMAGE_DISPLAY_H as usize);
+                                let img_x = self.text_margin as i32
+                                    + ((self.text_w as i32 - img.width as i32) / 2).max(0);
+                                // clamp to remaining vertical space so images near
+                                // the bottom of a page are never cut off
+                                let space_below =
+                                    (self.text_area_h as i32 - i as i32 * line_h).max(0) as usize;
+                                let blit_h = (img.height as usize).min(space_below);
                                 strip.blit_1bpp(
                                     &img.data,
                                     0,
@@ -1445,7 +1508,7 @@ impl App<AppId> for ReaderApp {
                                     strip,
                                     "[image]",
                                     fonts::Style::Italic,
-                                    MARGIN as i32,
+                                    self.text_margin as i32,
                                     baseline,
                                 );
                             }
@@ -1455,11 +1518,11 @@ impl App<AppId> for ReaderApp {
 
                     let start = span.start as usize;
                     let end = start + span.len as usize;
-                    let baseline = TEXT_Y as i32 + i as i32 * line_h + ascent;
+                    let baseline = self.text_y as i32 + i as i32 * line_h + ascent;
                     let x_indent = INDENT_PX as i32 * span.indent as i32;
 
                     let line = &self.pg.buf[start..end];
-                    let mut cx = MARGIN as i32 + x_indent;
+                    let mut cx = self.text_margin as i32 + x_indent;
                     let mut sty = span.style();
                     let mut j = 0usize;
                     while j < line.len() {
@@ -1503,24 +1566,10 @@ impl App<AppId> for ReaderApp {
                 let start = span.start as usize;
                 let end = start + span.len as usize;
                 let text = core::str::from_utf8(&self.pg.buf[start..end]).unwrap_or("");
-                let y = TEXT_Y as i32 + i as i32 * LINE_H as i32 + LINE_H as i32;
-                Text::new(text, Point::new(MARGIN as i32, y), style)
+                let y = self.text_y as i32 + i as i32 * LINE_H as i32 + LINE_H as i32;
+                Text::new(text, Point::new(self.text_margin as i32, y), style)
                     .draw(strip)
                     .unwrap();
-            }
-        }
-
-        if self.state == State::Ready && (self.file_size > 0 || self.is_epub) {
-            let pct = self.progress_pct() as u32;
-            let filled_w = (PROGRESS_W as u32 * pct / 100).min(PROGRESS_W as u32);
-            if filled_w > 0 {
-                Rectangle::new(
-                    Point::new(MARGIN as i32, PROGRESS_Y as i32),
-                    Size::new(filled_w, READER_PROGRESS_H as u32),
-                )
-                .into_styled(PrimitiveStyle::with_fill(BinaryColor::On))
-                .draw(strip)
-                .unwrap();
             }
         }
 

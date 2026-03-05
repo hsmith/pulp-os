@@ -20,14 +20,14 @@ fn linker_be_nice() {
         match kind.as_str() {
             "undefined-symbol" => match what.as_str() {
                 what if what.starts_with("_defmt_") => hint(
-                    "`defmt` not found - make sure `defmt.x` is added as a linker script and you have included `use defmt_rtt as _;`"
+                    "`defmt` not found - make sure `defmt.x` is added as a linker script and you have included `use defmt_rtt as _;`",
                 ),
                 "_stack_start" => hint("is the linker script `linkall.x` missing?"),
                 what if what.starts_with("esp_rtos_") => hint(
-                    "`esp-radio` has no scheduler enabled. make sure you have initialized `esp-rtos` or provided an external scheduler."
+                    "`esp-radio` has no scheduler enabled. make sure you have initialized `esp-rtos` or provided an external scheduler.",
                 ),
                 "embedded_test_linker_file_not_added_to_rustflags" => hint(
-                    "`embedded-test` not found - make sure `embedded-test.x` is added as a linker script for tests"
+                    "`embedded-test` not found - make sure `embedded-test.x` is added as a linker script for tests",
                 ),
                 "free"
                 | "malloc"
@@ -37,7 +37,7 @@ fn linker_be_nice() {
                 | "realloc_internal"
                 | "calloc_internal"
                 | "free_internal" => hint(
-                    "did you forget the `esp-alloc` dependency or didn't enable the `compat` feature on it?"
+                    "did you forget the `esp-alloc` dependency or didn't enable the `compat` feature on it?",
                 ),
                 _ => (),
             },
@@ -169,13 +169,98 @@ fn extended_codepoints() -> Vec<u32> {
     ];
     cps.extend_from_slice(punctuation);
 
-    // Currency and math
-    let symbols: &[u32] = &[
+    // Currency symbols (common ones for e-books)
+    let currency: &[u32] = &[
+        0x00A2, // ¢ cent sign (already in Latin-1, but explicit)
+        0x00A3, // £ pound sign (already in Latin-1)
+        0x00A5, // ¥ yen sign (already in Latin-1)
         0x20AC, // € euro sign
-        0x2122, // ™ trade mark sign
-        0x2212, // − minus sign
+        0x20A3, // ₣ french franc
+        0x20A4, // ₤ lira sign
+        0x20A7, // ₧ peseta sign
+        0x20A9, // ₩ won sign
+        0x20B9, // ₹ indian rupee
+        0x20BD, // ₽ ruble sign
     ];
-    cps.extend_from_slice(symbols);
+    cps.extend_from_slice(currency);
+
+    // Math symbols (common in books)
+    let math: &[u32] = &[
+        0x00B1, // ± plus-minus (already in Latin-1)
+        0x00D7, // × multiplication (already in Latin-1)
+        0x00F7, // ÷ division (already in Latin-1)
+        0x2212, // − minus sign
+        0x2260, // ≠ not equal to
+        0x2264, // ≤ less than or equal to
+        0x2265, // ≥ greater than or equal to
+        0x2248, // ≈ almost equal to
+        0x221E, // ∞ infinity
+        0x221A, // √ square root
+        0x03C0, // π pi (Greek letter)
+        0x00B0, // ° degree sign (already in Latin-1)
+        0x2030, // ‰ per mille sign
+        0x2070, // ⁰ superscript 0
+        0x00B9, // ¹ superscript 1 (already in Latin-1)
+        0x00B2, // ² superscript 2 (already in Latin-1)
+        0x00B3, // ³ superscript 3 (already in Latin-1)
+        0x2074, // ⁴ superscript 4
+        0x2075, // ⁵ superscript 5
+        0x2076, // ⁶ superscript 6
+        0x2077, // ⁷ superscript 7
+        0x2078, // ⁸ superscript 8
+        0x2079, // ⁹ superscript 9
+    ];
+    cps.extend_from_slice(math);
+
+    // Arrows (useful for navigation hints, diagrams)
+    let arrows: &[u32] = &[
+        0x2190, // ← leftwards arrow
+        0x2191, // ↑ upwards arrow
+        0x2192, // → rightwards arrow
+        0x2193, // ↓ downwards arrow
+        0x2194, // ↔ left right arrow
+        0x2195, // ↕ up down arrow
+        0x21D0, // ⇐ leftwards double arrow
+        0x21D2, // ⇒ rightwards double arrow
+        0x21D4, // ⇔ left right double arrow
+    ];
+    cps.extend_from_slice(arrows);
+
+    // Miscellaneous symbols (common in e-books)
+    let misc: &[u32] = &[
+        0x2122, // ™ trade mark sign
+        0x00A9, // © copyright (already in Latin-1)
+        0x00AE, // ® registered (already in Latin-1)
+        0x2020, // † dagger
+        0x2021, // ‡ double dagger
+        0x2023, // ‣ triangular bullet
+        0x25A0, // ■ black square
+        0x25A1, // □ white square
+        0x25CF, // ● black circle
+        0x25CB, // ○ white circle
+        0x2605, // ★ black star
+        0x2606, // ☆ white star
+        0x2713, // ✓ check mark
+        0x2717, // ✗ ballot x
+        0x00A7, // § section sign (already in Latin-1)
+        0x00B6, // ¶ pilcrow / paragraph sign (already in Latin-1)
+    ];
+    cps.extend_from_slice(misc);
+
+    // Additional Latin Extended-B for more complete European language support
+    let latin_ext_b: &[u32] = &[
+        0x0180, // ƀ b with stroke (Croatian)
+        0x0192, // ƒ f with hook (Dutch florin)
+        0x01A0, 0x01A1, // Ơơ O with horn (Vietnamese)
+        0x01AF, 0x01B0, // Ưư U with horn (Vietnamese)
+        0x01CD, 0x01CE, // Ǎǎ A with caron
+        0x01CF, 0x01D0, // Ǐǐ I with caron
+        0x01D1, 0x01D2, // Ǒǒ O with caron
+        0x01D3, 0x01D4, // Ǔǔ U with caron
+        0x0218, 0x0219, // Șș S with comma below (Romanian)
+        0x021A, 0x021B, // Țț T with comma below (Romanian)
+    ];
+    cps.extend_from_slice(latin_ext_b);
 
     cps.sort();
     cps.dedup();

@@ -60,7 +60,7 @@ const MDNS_RESPONSE_LEN: usize = 38;
 const MAX_BOUNDARY_LEN: usize = 120;
 const WORK_BUF_SIZE: usize = 2048;
 
-// TCP buffer sizes 
+// TCP buffer sizes
 
 const TCP_RX_BUF_SIZE: usize = 2048;
 const TCP_TX_BUF_SIZE: usize = 1536;
@@ -69,7 +69,7 @@ const HTTP_HEADER_BUF_SIZE: usize = 1024;
 
 const DIR_LIST_MAX: usize = 64;
 
-// HTTP timing 
+// HTTP timing
 const HTTP_TIMEOUT_SECS: u64 = 30;
 const ACCEPT_RETRY_MS: u64 = 200;
 

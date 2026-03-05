@@ -29,12 +29,75 @@ pub const GHOST_CLEAR_STEP: u8 = 5;
 // default font size index (0=XSmall, 1=Small, 2=Medium, 3=Large, 4=XLarge)
 pub const DEFAULT_FONT_SIZE_IDX: u8 = 2;
 
+// reading themes: named presets for margins, spacing, and overall feel.
+// each theme bundles margin_h, margin_v, line_spacing_pct into one
+// user-friendly selection instead of exposing raw pixel values.
+//
+// theme index is stored as a single u8 in SETTINGS.TXT:
+//   0 = Compact   – narrow margins, tight spacing, max content
+//   1 = Default   – balanced for most books
+//   2 = Relaxed   – wider margins, looser spacing, easier on the eyes
+//   3 = Spacious  – large margins, generous spacing, paperback feel
+
+pub const NUM_READING_THEMES: u8 = 4;
+pub const DEFAULT_READING_THEME: u8 = 1;
+
+#[derive(Clone, Copy)]
+pub struct ReadingTheme {
+    pub name: &'static str,
+    pub margin_h: u16,         // horizontal margin in pixels
+    pub margin_v: u16,         // vertical margin (top offset) in pixels
+    pub line_spacing_pct: u16, // line spacing as percentage (100 = font native)
+}
+
+pub const READING_THEMES: [ReadingTheme; NUM_READING_THEMES as usize] = [
+    ReadingTheme {
+        name: "Compact",
+        margin_h: 8,
+        margin_v: 0,
+        line_spacing_pct: 100,
+    },
+    ReadingTheme {
+        name: "Default",
+        margin_h: 16,
+        margin_v: 4,
+        line_spacing_pct: 120,
+    },
+    ReadingTheme {
+        name: "Relaxed",
+        margin_h: 24,
+        margin_v: 8,
+        line_spacing_pct: 140,
+    },
+    ReadingTheme {
+        name: "Spacious",
+        margin_h: 40,
+        margin_v: 12,
+        line_spacing_pct: 160,
+    },
+];
+
+// look up the active reading theme by index; falls back to Default
+pub fn reading_theme(idx: u8) -> &'static ReadingTheme {
+    let i = (idx as usize).min(READING_THEMES.len() - 1);
+    &READING_THEMES[i]
+}
+
 #[derive(Clone, Copy)]
 pub struct SystemSettings {
-    pub sleep_timeout: u16,     // minutes idle before sleep; 0 = never
-    pub ghost_clear_every: u8,  // partial refreshes before forced full GC
-    pub book_font_size_idx: u8, // 0 = Small, 1 = Medium, 2 = Large
-    pub ui_font_size_idx: u8,   // 0 = Small, 1 = Medium, 2 = Large
+    // power settings
+    pub sleep_timeout: u16,    // minutes idle before sleep; 0 = never
+    pub ghost_clear_every: u8, // partial refreshes before forced full GC
+
+    // font settings
+    pub book_font_size_idx: u8, // 0 = XSmall, 1 = Small, 2 = Medium, 3 = Large, 4 = XLarge
+    pub ui_font_size_idx: u8,   // 0 = XSmall, 1 = Small, 2 = Medium, 3 = Large, 4 = XLarge
+
+    // reading settings
+    pub reading_theme: u8, // index into READING_THEMES
+
+    // control settings
+    pub swap_buttons: bool, // swap Back/Select with Left/Right physical buttons
 }
 
 impl Default for SystemSettings {
@@ -50,6 +113,8 @@ impl SystemSettings {
             ghost_clear_every: DEFAULT_GHOST_CLEAR,
             book_font_size_idx: DEFAULT_FONT_SIZE_IDX,
             ui_font_size_idx: DEFAULT_FONT_SIZE_IDX,
+            reading_theme: DEFAULT_READING_THEME,
+            swap_buttons: false,
         }
     }
 
@@ -64,6 +129,7 @@ impl SystemSettings {
             .clamp(MIN_GHOST_CLEAR, MAX_GHOST_CLEAR);
         self.book_font_size_idx = self.book_font_size_idx.min(max_font);
         self.ui_font_size_idx = self.ui_font_size_idx.min(max_font);
+        self.reading_theme = self.reading_theme.min(NUM_READING_THEMES - 1);
     }
 
     // reasonable default - override via sanitize_with_max_font
@@ -163,6 +229,14 @@ fn apply_setting(key: &[u8], val: &[u8], s: &mut SystemSettings, w: &mut WifiCon
                 s.ui_font_size_idx = v as u8;
             }
         }
+        b"reading_theme" => {
+            if let Some(v) = parse_u16(val) {
+                s.reading_theme = v as u8;
+            }
+        }
+        b"swap_buttons" => {
+            s.swap_buttons = val == b"1" || val == b"true";
+        }
         b"wifi_ssid" => w.set_ssid(val),
         b"wifi_pass" => w.set_pass(val),
         _ => {}
@@ -234,10 +308,21 @@ pub fn write_settings_txt(s: &SystemSettings, w: &WifiConfig, buf: &mut [u8]) ->
     let mut wr = TxtWriter::new(buf);
     wr.put(b"# pulp-os settings\n");
     wr.put(b"# lines starting with # are ignored\n\n");
+
+    wr.put(b"# power settings\n");
     wr.kv_num(b"sleep_timeout", s.sleep_timeout);
     wr.kv_num(b"ghost_clear", s.ghost_clear_every as u16);
+
+    wr.put(b"\n# font settings\n");
     wr.kv_num(b"book_font", s.book_font_size_idx as u16);
     wr.kv_num(b"ui_font", s.ui_font_size_idx as u16);
+
+    wr.put(b"\n# reading settings (0=Compact, 1=Default, 2=Relaxed, 3=Spacious)\n");
+    wr.kv_num(b"reading_theme", s.reading_theme as u16);
+
+    wr.put(b"\n# control settings\n");
+    wr.kv_num(b"swap_buttons", if s.swap_buttons { 1 } else { 0 });
+
     wr.put(b"\n# wifi credentials for upload mode\n");
     wr.kv_str(b"wifi_ssid", &w.ssid[..w.ssid_len as usize]);
     wr.kv_str(b"wifi_pass", &w.pass[..w.pass_len as usize]);
