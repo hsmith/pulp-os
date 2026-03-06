@@ -2,16 +2,17 @@
 
 use core::fmt::Write as _;
 
-use crate::apps::widgets::selectable_row::draw_selection;
 use crate::apps::{App, AppContext, AppId, RECENT_FILE, Transition};
 use crate::board::action::{Action, ActionEvent};
 use crate::board::{SCREEN_H, SCREEN_W};
 use crate::drivers::strip::StripBuffer;
 use crate::fonts;
-use crate::fonts::bitmap::byte_to_char;
 use crate::kernel::KernelHandle;
 use crate::kernel::bookmarks::{self, BmListEntry};
-use crate::ui::{Alignment, BUTTON_BAR_H, BitmapDynLabel, BitmapLabel, CONTENT_TOP, Region};
+use crate::ui::{
+    Alignment, BitmapDynLabel, BitmapLabel, CONTENT_TOP, FULL_CONTENT_W, HEADER_W, LARGE_MARGIN,
+    Region, SECTION_GAP, TITLE_Y_OFFSET,
+};
 
 const ITEM_W: u16 = 280;
 const ITEM_H: u16 = 52;
@@ -21,9 +22,14 @@ const ITEM_X: u16 = (SCREEN_W - ITEM_W) / 2;
 const TITLE_ITEM_GAP: u16 = 24;
 const MAX_ITEMS: usize = 5;
 
-const BM_MARGIN: u16 = 8;
-const BM_HEADER_GAP: u16 = 4;
-const BM_BOTTOM: u16 = SCREEN_H - BUTTON_BAR_H;
+// bookmark list layout (matches Files app)
+const BM_ROW_H: u16 = 52;
+const BM_ROW_GAP: u16 = 4;
+const BM_ROW_STRIDE: u16 = BM_ROW_H + BM_ROW_GAP;
+const BM_TITLE_Y: u16 = CONTENT_TOP + TITLE_Y_OFFSET;
+const BM_HEADER_LIST_GAP: u16 = SECTION_GAP;
+const BM_STATUS_W: u16 = 144;
+const BM_STATUS_X: u16 = SCREEN_W - LARGE_MARGIN - BM_STATUS_W;
 
 const CONTENT_REGION: Region = Region::new(0, CONTENT_TOP, SCREEN_W, SCREEN_H - CONTENT_TOP);
 
@@ -226,17 +232,42 @@ impl HomeApp {
         }
     }
 
-    fn bm_text_y(&self) -> u16 {
-        CONTENT_TOP + 4 + self.ui_fonts.heading.line_height + BM_HEADER_GAP
+    fn bm_list_y(&self) -> u16 {
+        BM_TITLE_Y + self.ui_fonts.heading.line_height + BM_HEADER_LIST_GAP
     }
 
     fn bm_visible_lines(&self) -> usize {
-        let area_h = BM_BOTTOM.saturating_sub(self.bm_text_y());
-        (area_h / self.ui_fonts.body.line_height).max(1) as usize
+        let available = SCREEN_H.saturating_sub(self.bm_list_y());
+        let rows = (available / BM_ROW_STRIDE) as usize;
+        rows.max(1).min(bookmarks::SLOTS)
     }
 
-    fn bm_page_region(&self) -> Region {
-        Region::new(0, self.bm_text_y(), SCREEN_W, BM_BOTTOM - self.bm_text_y())
+    fn bm_row_region(&self, i: usize) -> Region {
+        Region::new(
+            LARGE_MARGIN,
+            self.bm_list_y() + i as u16 * BM_ROW_STRIDE,
+            FULL_CONTENT_W,
+            BM_ROW_H,
+        )
+    }
+
+    fn bm_list_region(&self) -> Region {
+        let vis = self.bm_visible_lines();
+        Region::new(
+            LARGE_MARGIN,
+            self.bm_list_y(),
+            FULL_CONTENT_W,
+            BM_ROW_STRIDE * vis as u16,
+        )
+    }
+
+    fn bm_status_region(&self) -> Region {
+        Region::new(
+            BM_STATUS_X,
+            BM_TITLE_Y,
+            BM_STATUS_W,
+            self.ui_fonts.heading.line_height,
+        )
     }
 }
 
@@ -278,9 +309,24 @@ impl App<AppId> for HomeApp {
 
         if self.needs_load_bookmarks {
             self.bm_count = k.bookmark_cache().load_all(&mut self.bm_entries);
+            // resolve titles from dir cache
+            let _ = k.ensure_dir_cache_loaded();
+            for i in 0..self.bm_count {
+                let entry = &self.bm_entries[i];
+                let fname = &entry.filename[..entry.name_len as usize];
+                if let Some((title, len)) = k.dir_cache_mut().find_title(fname) {
+                    let mut tbuf = [0u8; 96];
+                    let n = (len as usize).min(96);
+                    tbuf[..n].copy_from_slice(&title[..n]);
+                    self.bm_entries[i].set_title(&tbuf[..n]);
+                } else {
+                    // inline humanize: lowercase all-upper SFN filenames
+                    humanize_bm_entry(&mut self.bm_entries[i]);
+                }
+            }
             self.needs_load_bookmarks = false;
             if self.state == HomeState::ShowBookmarks {
-                ctx.mark_dirty(self.bm_page_region());
+                ctx.mark_dirty(self.bm_list_region());
             }
         }
     }
@@ -342,36 +388,48 @@ impl HomeApp {
 
             ActionEvent::Press(Action::Next) | ActionEvent::Repeat(Action::Next) => {
                 if self.bm_count > 0 {
+                    let old = self.bm_selected;
+                    let vis = self.bm_visible_lines();
                     if self.bm_selected + 1 < self.bm_count {
                         self.bm_selected += 1;
+                        if self.bm_selected >= self.bm_scroll + vis {
+                            self.bm_scroll = self.bm_selected + 1 - vis;
+                            ctx.mark_dirty(self.bm_list_region());
+                        } else {
+                            ctx.mark_dirty(self.bm_row_region(old - self.bm_scroll));
+                            ctx.mark_dirty(self.bm_row_region(self.bm_selected - self.bm_scroll));
+                        }
                     } else {
                         self.bm_selected = 0;
                         self.bm_scroll = 0;
+                        ctx.mark_dirty(self.bm_list_region());
                     }
-                    let vis = self.bm_visible_lines();
-                    if self.bm_selected >= self.bm_scroll + vis {
-                        self.bm_scroll = self.bm_selected + 1 - vis;
-                    }
-                    ctx.mark_dirty(self.bm_page_region());
+                    ctx.mark_dirty(self.bm_status_region());
                 }
                 Transition::None
             }
 
             ActionEvent::Press(Action::Prev) | ActionEvent::Repeat(Action::Prev) => {
                 if self.bm_count > 0 {
+                    let old = self.bm_selected;
+                    let vis = self.bm_visible_lines();
                     if self.bm_selected > 0 {
                         self.bm_selected -= 1;
+                        if self.bm_selected < self.bm_scroll {
+                            self.bm_scroll = self.bm_selected;
+                            ctx.mark_dirty(self.bm_list_region());
+                        } else {
+                            ctx.mark_dirty(self.bm_row_region(old - self.bm_scroll));
+                            ctx.mark_dirty(self.bm_row_region(self.bm_selected - self.bm_scroll));
+                        }
                     } else {
                         self.bm_selected = self.bm_count - 1;
-                        let vis = self.bm_visible_lines();
                         if self.bm_selected >= vis {
                             self.bm_scroll = self.bm_selected + 1 - vis;
                         }
+                        ctx.mark_dirty(self.bm_list_region());
                     }
-                    if self.bm_selected < self.bm_scroll {
-                        self.bm_scroll = self.bm_selected;
-                    }
-                    ctx.mark_dirty(self.bm_page_region());
+                    ctx.mark_dirty(self.bm_status_region());
                 }
                 Transition::None
             }
@@ -383,7 +441,8 @@ impl HomeApp {
                     if self.bm_selected >= self.bm_scroll + vis {
                         self.bm_scroll = self.bm_selected + 1 - vis;
                     }
-                    ctx.mark_dirty(self.bm_page_region());
+                    ctx.mark_dirty(self.bm_list_region());
+                    ctx.mark_dirty(self.bm_status_region());
                 }
                 Transition::None
             }
@@ -394,7 +453,8 @@ impl HomeApp {
                 if self.bm_selected < self.bm_scroll {
                     self.bm_scroll = self.bm_selected;
                 }
-                ctx.mark_dirty(self.bm_page_region());
+                ctx.mark_dirty(self.bm_list_region());
+                ctx.mark_dirty(self.bm_status_region());
                 Transition::None
             }
 
@@ -439,9 +499,9 @@ impl HomeApp {
 
     fn draw_bookmarks(&self, strip: &mut StripBuffer) {
         let header_region = Region::new(
-            BM_MARGIN,
-            CONTENT_TOP + 4,
-            SCREEN_W - BM_MARGIN * 2,
+            LARGE_MARGIN,
+            BM_TITLE_Y,
+            HEADER_W,
             self.ui_fonts.heading.line_height,
         );
         BitmapLabel::new(header_region, "Bookmarks", self.ui_fonts.heading)
@@ -450,88 +510,62 @@ impl HomeApp {
             .unwrap();
 
         if self.bm_count > 0 {
-            let status_region = Region::new(
-                SCREEN_W / 2,
-                CONTENT_TOP + 4,
-                SCREEN_W / 2 - BM_MARGIN,
-                self.ui_fonts.heading.line_height,
-            );
-            let mut status = BitmapDynLabel::<20>::new(status_region, self.ui_fonts.body)
-                .alignment(Alignment::CenterRight);
+            let mut status =
+                BitmapDynLabel::<20>::new(self.bm_status_region(), self.ui_fonts.body)
+                    .alignment(Alignment::CenterRight);
             let _ = write!(status, "{}/{}", self.bm_selected + 1, self.bm_count);
             status.draw(strip).unwrap();
         }
 
         if self.bm_count == 0 {
-            let r = Region::new(
-                BM_MARGIN,
-                self.bm_text_y(),
-                300,
-                self.ui_fonts.body.line_height,
-            );
-            BitmapLabel::new(r, "No bookmarks saved", self.ui_fonts.body)
+            BitmapLabel::new(self.bm_row_region(0), "No bookmarks", self.ui_fonts.body)
                 .alignment(Alignment::CenterLeft)
                 .draw(strip)
                 .unwrap();
             return;
         }
 
-        let font = self.ui_fonts.body;
-        let line_h = font.line_height as i32;
-        let ascent = font.ascent as i32;
-        let text_y = self.bm_text_y() as i32;
         let vis = self.bm_visible_lines();
         let visible = vis.min(self.bm_count.saturating_sub(self.bm_scroll));
 
-        for i in 0..visible {
-            let idx = self.bm_scroll + i;
-            let entry = &self.bm_entries[idx];
-            let y_top = text_y + i as i32 * line_h;
-            let baseline = y_top + ascent;
-            let selected = idx == self.bm_selected;
+        for i in 0..vis {
+            let region = self.bm_row_region(i);
+            if i < visible {
+                let idx = self.bm_scroll + i;
+                let entry = &self.bm_entries[idx];
+                let name = entry.display_name();
 
-            let row_region = Region::new(0, y_top as u16, SCREEN_W, line_h as u16);
-            let fg = draw_selection(strip, row_region, selected);
-
-            let mut cx = BM_MARGIN as i32;
-
-            if entry.chapter > 0 {
-                let mut ch_buf = [0u8; 10];
-                let ch_len = fmt_chapter_prefix(&mut ch_buf, entry.chapter);
-                for &b in &ch_buf[..ch_len] {
-                    cx += font.draw_char_fg(strip, byte_to_char(b), fg, cx, baseline) as i32;
-                }
+                BitmapLabel::new(region, name, self.ui_fonts.body)
+                    .alignment(Alignment::CenterLeft)
+                    .inverted(idx == self.bm_selected)
+                    .draw(strip)
+                    .unwrap();
             }
-
-            font.draw_str_fg(strip, entry.filename_str(), fg, cx, baseline);
         }
     }
 }
 
-// format "Ch{N} " into buf (1-based), return byte count
-fn fmt_chapter_prefix(buf: &mut [u8; 10], chapter: u16) -> usize {
-    let n = chapter.saturating_add(1);
-    buf[0] = b'C';
-    buf[1] = b'h';
-    let mut pos = 2;
-    if n >= 10000 {
-        buf[pos] = b'0' + ((n / 10000) % 10) as u8;
-        pos += 1;
+// humanize an all-uppercase SFN bookmark filename into the title field
+fn humanize_bm_entry(entry: &mut BmListEntry) {
+    let nlen = entry.name_len as usize;
+    if nlen == 0 || entry.title_len > 0 {
+        return;
     }
-    if n >= 1000 {
-        buf[pos] = b'0' + ((n / 1000) % 10) as u8;
-        pos += 1;
+    let src = &entry.filename[..nlen];
+    let all_upper = src.iter().all(|&b| !b.is_ascii_lowercase());
+    if !all_upper {
+        return;
     }
-    if n >= 100 {
-        buf[pos] = b'0' + ((n / 100) % 10) as u8;
-        pos += 1;
+    let n = nlen.min(entry.title.len());
+    let dot_pos = src.iter().position(|&b| b == b'.').unwrap_or(n);
+    for i in 0..n {
+        entry.title[i] = if i == 0 {
+            src[i]
+        } else if i > dot_pos {
+            src[i].to_ascii_lowercase()
+        } else {
+            src[i].to_ascii_lowercase()
+        };
     }
-    if n >= 10 {
-        buf[pos] = b'0' + ((n / 10) % 10) as u8;
-        pos += 1;
-    }
-    buf[pos] = b'0' + (n % 10) as u8;
-    pos += 1;
-    buf[pos] = b' ';
-    pos + 1
+    entry.title_len = n as u8;
 }

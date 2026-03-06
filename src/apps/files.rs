@@ -16,14 +16,20 @@ use crate::drivers::strip::StripBuffer;
 use crate::error::{Error, ErrorKind};
 use crate::fonts;
 use crate::kernel::KernelHandle;
+use crate::kernel::QuickAction;
 use crate::ui::{
     Alignment, BitmapDynLabel, BitmapLabel, CONTENT_TOP, FULL_CONTENT_W, HEADER_W, LARGE_MARGIN,
     Region, SECTION_GAP, TITLE_Y_OFFSET,
 };
+use smol_epub::cache;
 use smol_epub::epub::{self, EpubMeta, EpubSpine};
 use smol_epub::zip::ZipIndex;
 
-const PAGE_SIZE: usize = 7;
+const MAX_PAGE_SIZE: usize = 14;
+
+const QA_DELETE_FILE: u8 = 1;
+const QA_DELETE_CACHE: u8 = 2;
+const QA_MAX: usize = 2;
 
 const LIST_X: u16 = LARGE_MARGIN;
 const LIST_W: u16 = FULL_CONTENT_W;
@@ -38,8 +44,15 @@ const STATUS_REGION: Region = Region::new(STATUS_X, FILES_STATUS_Y, STATUS_W, FI
 
 const ROW_H: u16 = 52;
 const ROW_GAP: u16 = 4;
+const ROW_STRIDE: u16 = ROW_H + ROW_GAP;
 
 const HEADER_LIST_GAP: u16 = SECTION_GAP;
+
+fn compute_page_size(list_y: u16) -> usize {
+    let available = SCREEN_H.saturating_sub(list_y);
+    let rows = (available / ROW_STRIDE) as usize;
+    rows.min(MAX_PAGE_SIZE)
+}
 
 impl Default for FilesApp {
     fn default() -> Self {
@@ -48,7 +61,8 @@ impl Default for FilesApp {
 }
 
 pub struct FilesApp {
-    entries: [DirEntry; PAGE_SIZE],
+    entries: [DirEntry; MAX_PAGE_SIZE],
+    page_size: usize,
     count: usize,
     total: usize,
     scroll: usize,
@@ -62,13 +76,20 @@ pub struct FilesApp {
     title_scan_idx: usize,
     title_scanning: bool,
     title_reload: bool,
+
+    qa_buf: [QuickAction; QA_MAX],
+    qa_count: usize,
+    pending_delete_file: bool,
+    pending_delete_cache: bool,
 }
 
 impl FilesApp {
     pub fn new() -> Self {
         let uf = fonts::UiFonts::for_size(0);
+        let list_y = TITLE_Y + uf.heading.line_height + HEADER_LIST_GAP;
         Self {
-            entries: [DirEntry::EMPTY; PAGE_SIZE],
+            entries: [DirEntry::EMPTY; MAX_PAGE_SIZE],
+            page_size: compute_page_size(list_y),
             count: 0,
             total: 0,
             scroll: 0,
@@ -77,16 +98,21 @@ impl FilesApp {
             stale_cache: false,
             error: None,
             ui_fonts: uf,
-            list_y: TITLE_Y + uf.heading.line_height + HEADER_LIST_GAP,
+            list_y,
             title_scan_idx: 0,
             title_scanning: false,
             title_reload: false,
+            qa_buf: [QuickAction::trigger(0, "", ""); QA_MAX],
+            qa_count: 0,
+            pending_delete_file: false,
+            pending_delete_cache: false,
         }
     }
 
     pub fn set_ui_font_size(&mut self, idx: u8) {
         self.ui_fonts = fonts::UiFonts::for_size(idx);
         self.list_y = TITLE_Y + self.ui_fonts.heading.line_height + HEADER_LIST_GAP;
+        self.page_size = compute_page_size(self.list_y);
     }
 
     // Session state accessors for RTC persistence
@@ -127,7 +153,7 @@ impl FilesApp {
     }
 
     fn load_page(&mut self, entries: &[DirEntry], total: usize) {
-        let n = entries.len().min(PAGE_SIZE);
+        let n = entries.len().min(self.page_size);
         self.entries[..n].clone_from_slice(&entries[..n]);
         self.count = n;
         self.total = total;
@@ -136,6 +162,7 @@ impl FilesApp {
         if self.selected >= self.count && self.count > 0 {
             self.selected = self.count - 1;
         }
+        self.rebuild_quick_actions();
     }
 
     fn load_failed(&mut self, e: Error) {
@@ -158,7 +185,7 @@ impl FilesApp {
             LIST_X,
             self.list_y,
             LIST_W,
-            (ROW_H + ROW_GAP) * PAGE_SIZE as u16,
+            ROW_STRIDE * self.page_size as u16,
         )
     }
 
@@ -168,11 +195,12 @@ impl FilesApp {
             self.selected -= 1;
             ctx.mark_dirty(self.row_region(self.selected));
             ctx.mark_dirty(STATUS_REGION);
+            self.rebuild_quick_actions();
         } else if self.scroll > 0 {
             self.scroll = self.scroll.saturating_sub(1);
             self.needs_load = true;
         } else if self.total > 0 {
-            self.scroll = self.total.saturating_sub(PAGE_SIZE);
+            self.scroll = self.total.saturating_sub(self.page_size);
             self.selected = self.total.saturating_sub(self.scroll) - 1;
             self.needs_load = true;
         }
@@ -184,6 +212,7 @@ impl FilesApp {
             self.selected += 1;
             ctx.mark_dirty(self.row_region(self.selected));
             ctx.mark_dirty(STATUS_REGION);
+            self.rebuild_quick_actions();
         } else if self.scroll + self.count < self.total {
             self.scroll += 1;
             self.needs_load = true;
@@ -196,7 +225,7 @@ impl FilesApp {
 
     fn jump_up(&mut self) {
         if self.scroll > 0 {
-            self.scroll = self.scroll.saturating_sub(PAGE_SIZE);
+            self.scroll = self.scroll.saturating_sub(self.page_size);
             self.selected = 0;
             self.needs_load = true;
         } else {
@@ -204,10 +233,35 @@ impl FilesApp {
         }
     }
 
+    fn rebuild_quick_actions(&mut self) {
+        let mut n = 0usize;
+        let (is_file, is_epub) = if self.selected < self.count {
+            let e = &self.entries[self.selected];
+            let nm = &e.name[..e.name_len as usize];
+            let epub = !e.is_dir
+                && nm.len() >= 5
+                && nm[nm.len() - 5] == b'.'
+                && nm[nm.len() - 4..].eq_ignore_ascii_case(b"EPUB");
+            (!e.is_dir, epub)
+        } else {
+            (false, false)
+        };
+
+        if is_file {
+            self.qa_buf[n] = QuickAction::trigger(QA_DELETE_FILE, "Delete File", "Delete");
+            n += 1;
+            if is_epub {
+                self.qa_buf[n] = QuickAction::trigger(QA_DELETE_CACHE, "Delete Cache", "Delete");
+                n += 1;
+            }
+        }
+        self.qa_count = n;
+    }
+
     fn jump_down(&mut self) {
         let remaining = self.total.saturating_sub(self.scroll + self.count);
         if remaining > 0 {
-            self.scroll += PAGE_SIZE.min(remaining + self.count - 1);
+            self.scroll += self.page_size.min(remaining + self.count - 1);
             self.selected = 0;
             self.needs_load = true;
         } else if self.count > 0 {
@@ -250,14 +304,68 @@ impl App<AppId> for FilesApp {
     }
 
     async fn background(&mut self, ctx: &mut AppContext, k: &mut KernelHandle<'_>) {
+        if self.pending_delete_file {
+            self.pending_delete_file = false;
+            if let Some(entry) = self.selected_entry() {
+                if !entry.is_dir {
+                    let mut nb = [0u8; 13];
+                    let nl = entry.name_len as usize;
+                    nb[..nl].copy_from_slice(&entry.name[..nl]);
+                    let name = core::str::from_utf8(&nb[..nl]).unwrap_or("");
+                    log::info!("files: deleting {}", name);
+
+                    // also remove bookmark
+                    k.bookmark_cache_mut().remove(&nb[..nl]);
+
+                    match k.delete_file(name) {
+                        Ok(()) => {
+                            log::info!("files: deleted {}", name);
+                            k.invalidate_dir_cache();
+                            self.needs_load = true;
+                            self.stale_cache = true;
+                            self.title_scan_idx = 0;
+                            self.title_scanning = true;
+                        }
+                        Err(e) => {
+                            log::warn!("files: delete failed: {}", e);
+                        }
+                    }
+                }
+            }
+            ctx.mark_dirty(self.list_region());
+            ctx.mark_dirty(STATUS_REGION);
+            return;
+        }
+
+        if self.pending_delete_cache {
+            self.pending_delete_cache = false;
+            if let Some(entry) = self.selected_entry() {
+                if !entry.is_dir {
+                    let nl = entry.name_len as usize;
+                    let name = core::str::from_utf8(&entry.name[..nl]).unwrap_or("");
+                    let hash = cache::fnv1a(name.as_bytes());
+                    let cf = cache::cache_filename(hash);
+                    let cf_str = cache::cache_filename_str(&cf);
+                    log::info!("files: deleting cache for {} ({})", name, cf_str);
+
+                    // delete v3 flat cache file (best effort)
+                    match k.delete_cache(cf_str) {
+                        Ok(()) => log::info!("files: cache deleted for {}", name),
+                        Err(e) => log::warn!("files: cache delete failed: {}", e),
+                    }
+                }
+            }
+            return;
+        }
+
         if self.needs_load {
             if self.stale_cache {
                 k.invalidate_dir_cache();
                 self.stale_cache = false;
             }
 
-            let mut buf = [DirEntry::EMPTY; PAGE_SIZE];
-            match k.dir_page(self.scroll, &mut buf) {
+            let mut buf = [DirEntry::EMPTY; MAX_PAGE_SIZE];
+            match k.dir_page(self.scroll, &mut buf[..self.page_size]) {
                 Ok(page) => {
                     self.load_page(&buf[..page.count], page.total);
                 }
@@ -384,7 +492,7 @@ impl App<AppId> for FilesApp {
             return;
         }
 
-        for i in 0..PAGE_SIZE {
+        for i in 0..self.page_size {
             let region = self.row_region(i);
 
             if i < self.count {
@@ -403,6 +511,22 @@ impl App<AppId> for FilesApp {
                     .draw(strip)
                     .unwrap();
             }
+        }
+    }
+
+    fn quick_actions(&self) -> &[QuickAction] {
+        &self.qa_buf[..self.qa_count]
+    }
+
+    fn on_quick_trigger(&mut self, id: u8, _ctx: &mut AppContext) {
+        match id {
+            QA_DELETE_FILE => {
+                self.pending_delete_file = true;
+            }
+            QA_DELETE_CACHE => {
+                self.pending_delete_cache = true;
+            }
+            _ => {}
         }
     }
 }

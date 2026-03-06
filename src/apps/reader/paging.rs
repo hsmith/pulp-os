@@ -1,6 +1,5 @@
 // text wrapping, page navigation, and load/prefetch
 
-use smol_epub::cache;
 use smol_epub::html_strip::{
     BOLD_OFF, BOLD_ON, HEADING_OFF, HEADING_ON, IMG_REF, ITALIC_OFF, ITALIC_ON, MARKER, QUOTE_OFF,
     QUOTE_ON,
@@ -10,8 +9,8 @@ use crate::fonts;
 use crate::kernel::KernelHandle;
 
 use super::{
-    DEFAULT_IMG_H, INDENT_PX, LINES_PER_PAGE, LineSpan, MAX_PAGES, NO_PREFETCH, PAGE_BUF,
-    ReaderApp, State, decode_utf8_char,
+    decode_utf8_char, LineSpan, ReaderApp, State, DEFAULT_IMG_H, INDENT_PX, LINES_PER_PAGE,
+    MAX_PAGES, NO_PREFETCH, PAGE_BUF,
 };
 
 impl ReaderApp {
@@ -133,13 +132,12 @@ impl ReaderApp {
             self.pg.prefetch_page = NO_PREFETCH;
             self.pg.prefetch_len = 0;
         } else if self.is_epub && self.epub.chapters_cached {
-            let dir = self.epub.cache_dir_str();
-            let ch_file = cache::chapter_file_name(self.epub.chapter);
-            let ch_str = cache::chapter_file_str(&ch_file);
-            let n = k.read_app_subdir_chunk(
-                dir,
-                ch_str,
-                self.pg.offsets[self.pg.page],
+            let cf_str = self.epub.cache_file_str();
+            let ch = self.epub.chapter as usize;
+            let ch_base = self.epub.chapter_table[ch].0;
+            let n = k.read_cache_chunk(
+                cf_str,
+                ch_base + self.pg.offsets[self.pg.page],
                 &mut self.pg.buf,
             )?;
             self.pg.buf_len = n;
@@ -179,10 +177,10 @@ impl ReaderApp {
         if self.pg.page + 1 < self.pg.total_pages {
             let pf_offset = self.pg.offsets[self.pg.page + 1];
             let pf_result = if self.is_epub && self.epub.chapters_cached {
-                let dir = self.epub.cache_dir_str();
-                let ch_file = cache::chapter_file_name(self.epub.chapter);
-                let ch_str = cache::chapter_file_str(&ch_file);
-                k.read_app_subdir_chunk(dir, ch_str, pf_offset, &mut self.pg.prefetch)
+                let cf_str = self.epub.cache_file_str();
+                let ch = self.epub.chapter as usize;
+                let ch_base = self.epub.chapter_table[ch].0;
+                k.read_cache_chunk(cf_str, ch_base + pf_offset, &mut self.pg.prefetch)
             } else {
                 k.read_chunk(name, pf_offset, &mut self.pg.prefetch)
             };

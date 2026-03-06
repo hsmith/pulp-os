@@ -239,8 +239,9 @@ pub(super) struct EpubState {
     pub(super) spine: EpubSpine,
     pub(super) chapter: u16,
 
+    pub(super) cache_file: [u8; 12],
     pub(super) cache_dir: [u8; 8],
-    chapter_sizes: [u32; cache::MAX_CACHE_CHAPTERS],
+    pub(super) chapter_table: [(u32, u32); cache::MAX_CACHE_CHAPTERS],
     pub(super) chapters_cached: bool,
     pub(super) cache_chapter: u16,
     pub(super) ch_cached: [bool; cache::MAX_CACHE_CHAPTERS],
@@ -252,6 +253,9 @@ pub(super) struct EpubState {
     pub(super) img_cache_ch: u16,
     pub(super) img_cache_offset: u32,
     pub(super) img_scan_wrapped: bool,
+    pub(super) skip_large_img: bool,
+    pub(super) img_found_count: u16,
+    pub(super) img_cached_count: u16,
 
     pub(super) toc: EpubToc,
     pub(super) toc_source: Option<TocSource>,
@@ -270,10 +274,11 @@ impl EpubState {
             meta: EpubMeta::new(),
             spine: EpubSpine::new(),
             chapter: 0,
+            cache_file: [0u8; 12],
             cache_dir: [0u8; 8],
             name_hash: 0,
             archive_size: 0,
-            chapter_sizes: [0u32; cache::MAX_CACHE_CHAPTERS],
+            chapter_table: [(0u32, 0u32); cache::MAX_CACHE_CHAPTERS],
             chapters_cached: false,
             cache_chapter: 0,
             ch_cached: [false; cache::MAX_CACHE_CHAPTERS],
@@ -283,11 +288,19 @@ impl EpubState {
             img_cache_ch: 0,
             img_cache_offset: 0,
             img_scan_wrapped: false,
+            skip_large_img: false,
+            img_found_count: 0,
+            img_cached_count: 0,
             toc: EpubToc::new(),
             toc_source: None,
             toc_selected: 0,
             toc_scroll: 0,
         }
+    }
+
+    #[inline]
+    pub(super) fn cache_file_str(&self) -> &str {
+        cache::cache_filename_str(&self.cache_file)
     }
 
     #[inline]
@@ -298,7 +311,7 @@ impl EpubState {
     #[inline]
     pub(super) fn chapter_size(&self, ch: usize) -> u32 {
         if ch < cache::MAX_CACHE_CHAPTERS {
-            self.chapter_sizes[ch]
+            self.chapter_table[ch].1
         } else {
             0
         }
@@ -441,25 +454,44 @@ impl ReaderApp {
         self.epub.ch_cached[..n].iter().filter(|&&c| c).count()
     }
 
-    // update the kernel loading indicator with current caching progress
+    // update the kernel loading indicator with current caching progress.
+    // uses a unified percentage: chapters contribute 0-80%, images 80-100%.
     fn set_cache_loading(&self, ctx: &mut AppContext) {
-        let cached = self.cached_chapter_count();
-        let total = self.epub.spine.len();
+        let cached_ch = self.cached_chapter_count();
+        let total_ch = self.epub.spine.len();
+        let img_found = self.epub.img_found_count as usize;
+        let img_cached = self.epub.img_cached_count as usize;
+
         let mut lbuf = StackFmt::<28>::new();
-        if matches!(
+
+        let in_chapter_phase = matches!(
             self.epub.bg_cache,
             BgCacheState::CacheChapter | BgCacheState::WaitNearbyImage
-        ) && cached < total
-        {
-            let _ = write!(lbuf, "Caching {}/{}", cached, total);
+        ) && cached_ch < total_ch;
+
+        let pct = if in_chapter_phase {
+            let _ = write!(lbuf, "Caching {}/{}", cached_ch, total_ch);
+            // chapters: 0% to 80%
+            if total_ch > 0 {
+                ((cached_ch * 80) / total_ch).min(80) as u8
+            } else {
+                80
+            }
         } else {
-            let _ = write!(lbuf, "Caching image(s)");
-        }
-        let pct = if total > 0 {
-            ((cached * 100) / total).min(100) as u8
-        } else {
-            100
+            // image phase: 80% to 100%
+            if img_found > 0 {
+                let _ = write!(
+                    lbuf,
+                    "Caching images {}/{}",
+                    img_cached, img_found
+                );
+                (80 + (img_cached * 20) / img_found).min(100) as u8
+            } else {
+                let _ = write!(lbuf, "Caching images");
+                80
+            }
         };
+
         ctx.set_loading(LOADING_REGION, lbuf.as_str(), pct);
     }
 
@@ -482,6 +514,10 @@ impl ReaderApp {
                         self.epub.bg_cache = BgCacheState::CacheChapter;
                     }
                 }
+                Ok(None) if work_queue::is_idle() => {
+                    log::warn!("bg: worker idle with no result (suspended), recovering");
+                    self.epub.bg_cache = BgCacheState::CacheChapter;
+                }
                 Ok(None) => {}
                 Err(e) => {
                     log::warn!("bg: nearby image error (suspended): {}", e);
@@ -490,6 +526,10 @@ impl ReaderApp {
             },
             BgCacheState::WaitImage => match self.epub_recv_image_result(k) {
                 Ok(Some(_)) => self.epub.bg_cache = BgCacheState::CacheImage,
+                Ok(None) if work_queue::is_idle() => {
+                    log::warn!("bg: worker idle with no result (suspended), recovering");
+                    self.epub.bg_cache = BgCacheState::CacheImage;
+                }
                 Ok(None) => {}
                 Err(e) => {
                     log::warn!("bg: image recv error (suspended): {}", e);
@@ -793,6 +833,7 @@ impl App<AppId> for ReaderApp {
         self.epub.bg_cache = BgCacheState::Idle;
         self.epub.ch_cached = [false; cache::MAX_CACHE_CHAPTERS];
         self.epub.img_scan_wrapped = false;
+        self.epub.skip_large_img = false;
 
         self.is_epub = epub::is_epub_filename(self.name());
         self.rebuild_quick_actions();
@@ -1111,10 +1152,16 @@ impl App<AppId> for ReaderApp {
             }
             let prev_count = self.cached_chapter_count();
             let prev_bg = self.epub.bg_cache;
+            let prev_img_found = self.epub.img_found_count;
+            let prev_img_cached = self.epub.img_cached_count;
             self.bg_cache_step(k).await;
             if self.epub.bg_cache == BgCacheState::Idle {
                 ctx.clear_loading();
-            } else if self.cached_chapter_count() != prev_count || self.epub.bg_cache != prev_bg {
+            } else if self.cached_chapter_count() != prev_count
+                || self.epub.bg_cache != prev_bg
+                || self.epub.img_found_count != prev_img_found
+                || self.epub.img_cached_count != prev_img_cached
+            {
                 self.set_cache_loading(ctx);
             }
         }
@@ -1392,6 +1439,13 @@ impl App<AppId> for ReaderApp {
                 let total = self.epub.spine.len();
                 if cached < total {
                     let _ = write!(sbuf, " [{}/{}]", cached, total);
+                } else if self.epub.img_found_count > 0 {
+                    let _ = write!(
+                        sbuf,
+                        " [img {}/{}]",
+                        self.epub.img_cached_count,
+                        self.epub.img_found_count,
+                    );
                 } else {
                     let _ = write!(sbuf, " [img]");
                 }

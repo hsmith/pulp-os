@@ -7,7 +7,7 @@
 //   [16..48) filename [u8;32]
 
 use crate::drivers::sdcard::SdStorage;
-use crate::drivers::storage;
+use crate::drivers::storage::{self, TITLE_CAP};
 // FNV-1a hash with ASCII case folding, used for bookmark filename lookups.
 pub fn fnv1a_icase(data: &[u8]) -> u32 {
     let mut h: u32 = 0x811c_9dc5;
@@ -114,6 +114,8 @@ pub struct BmListEntry {
     pub filename: [u8; FILENAME_CAP],
     pub name_len: u8,
     pub chapter: u16,
+    pub title: [u8; TITLE_CAP],
+    pub title_len: u8,
 }
 
 impl BmListEntry {
@@ -121,10 +123,27 @@ impl BmListEntry {
         filename: [0u8; FILENAME_CAP],
         name_len: 0,
         chapter: 0,
+        title: [0u8; TITLE_CAP],
+        title_len: 0,
     };
 
     pub fn filename_str(&self) -> &str {
         core::str::from_utf8(&self.filename[..self.name_len as usize]).unwrap_or("?")
+    }
+
+    pub fn display_name(&self) -> &str {
+        if self.title_len > 0 {
+            core::str::from_utf8(&self.title[..self.title_len as usize])
+                .unwrap_or(self.filename_str())
+        } else {
+            self.filename_str()
+        }
+    }
+
+    pub fn set_title(&mut self, s: &[u8]) {
+        let n = s.len().min(TITLE_CAP);
+        self.title[..n].copy_from_slice(&s[..n]);
+        self.title_len = n as u8;
     }
 }
 
@@ -224,6 +243,8 @@ impl BookmarkCache {
                     filename: slot.filename,
                     name_len: slot.name_len,
                     chapter: slot.chapter,
+                    title: [0u8; TITLE_CAP],
+                    title_len: 0,
                 };
                 count += 1;
             }
@@ -326,6 +347,25 @@ impl BookmarkCache {
             generation,
             core::str::from_utf8(filename).unwrap_or("?"),
         );
+    }
+
+    pub fn remove(&mut self, filename: &[u8]) {
+        if !self.loaded {
+            return;
+        }
+        let key = fnv1a_icase(filename);
+        for i in 0..self.count {
+            let slot = &mut self.slots[i];
+            if slot.valid && slot.name_hash == key && slot.matches_name(filename) {
+                slot.valid = false;
+                self.dirty = true;
+                log::info!(
+                    "bookmark: removed {:?}",
+                    core::str::from_utf8(filename).unwrap_or("?")
+                );
+                return;
+            }
+        }
     }
 
     pub fn flush(&mut self, sd: &SdStorage) {

@@ -16,11 +16,11 @@ use smol_epub::html_strip::{IMG_REF, MARKER};
 use smol_epub::zip::{self, ZipIndex};
 
 use crate::error::{Error, ErrorKind};
-use crate::kernel::KernelHandle;
 use crate::kernel::work_queue;
+use crate::kernel::KernelHandle;
 
 use super::{
-    DEFAULT_IMG_H, MAX_IMAGES_PER_PAGE, NO_PREFETCH, PAGE_BUF, PRECACHE_IMG_MAX, ReaderApp,
+    ReaderApp, DEFAULT_IMG_H, MAX_IMAGES_PER_PAGE, NO_PREFETCH, PAGE_BUF, PRECACHE_IMG_MAX,
 };
 
 fn from_smol_image(img: smol_epub::DecodedImage) -> DecodedImage {
@@ -433,16 +433,16 @@ impl ReaderApp {
         let (nb, nl) = self.name_copy();
         let epub_name = core::str::from_utf8(&nb[..nl]).unwrap_or("");
 
-        let ch_file = cache::chapter_file_name(ch as u16);
-        let ch_str = cache::chapter_file_str(&ch_file);
+        let cf = self.epub.cache_file;
+        let cf_str = cache::cache_filename_str(&cf);
+        let ch_base = self.epub.chapter_table[ch].0;
 
         let mut offset = start_offset;
         while offset < ch_size {
             let read_len = PAGE_BUF.min(ch_size - offset);
-            let n = k.read_app_subdir_chunk(
-                dir,
-                ch_str,
-                offset as u32,
+            let n = k.read_cache_chunk(
+                cf_str,
+                ch_base + offset as u32,
                 &mut self.pg.prefetch[..read_len],
             )?;
             if n == 0 {
@@ -496,6 +496,8 @@ impl ReaderApp {
 
                 // already cached or skip-marked
                 if k.file_size_app_subdir(dir, img_file).is_ok() {
+                    self.epub.img_found_count = self.epub.img_found_count.saturating_add(1);
+                    self.epub.img_cached_count = self.epub.img_cached_count.saturating_add(1);
                     i = path_start + path_len;
                     continue;
                 }
@@ -506,6 +508,8 @@ impl ReaderApp {
                 if !is_jpeg && !is_png {
                     log::info!("precache: skip unsupported: {}", full_path);
                     let _ = k.write_app_subdir(dir, img_file, &[]);
+                    self.epub.img_found_count = self.epub.img_found_count.saturating_add(1);
+                    self.epub.img_cached_count = self.epub.img_cached_count.saturating_add(1);
                     i = path_start + path_len;
                     continue;
                 }
@@ -519,6 +523,8 @@ impl ReaderApp {
                     Some(idx) => idx,
                     None => {
                         log::warn!("precache: {} not in ZIP", full_path);
+                        self.epub.img_found_count = self.epub.img_found_count.saturating_add(1);
+                        self.epub.img_cached_count = self.epub.img_cached_count.saturating_add(1);
                         i = path_start + path_len;
                         continue;
                     }
@@ -526,8 +532,18 @@ impl ReaderApp {
 
                 let entry = *self.epub.zip.entry(zip_idx);
 
-                // large images: decode via streaming SD reads on main loop
+                // large images: decode via streaming SD reads on main loop.
+                // if a previous streaming decode failed (OOM), skip all
+                // remaining large images so the device stays responsive
                 if entry.uncomp_size > PRECACHE_IMG_MAX {
+                    if self.epub.skip_large_img {
+                        let _ = k.write_app_subdir(dir, img_file, &[]);
+                        self.epub.img_found_count = self.epub.img_found_count.saturating_add(1);
+                        self.epub.img_cached_count = self.epub.img_cached_count.saturating_add(1);
+                        i = path_start + path_len;
+                        continue;
+                    }
+
                     log::info!(
                         "precache: streaming {} ({} bytes)",
                         full_path,
@@ -566,8 +582,12 @@ impl ReaderApp {
                         Err(e) => {
                             log::warn!("precache: streaming failed: {}", e);
                             let _ = k.write_app_subdir(dir, img_file, &[]);
+                            // stop trying large images this session
+                            self.epub.skip_large_img = true;
                         }
                     }
+                    self.epub.img_found_count = self.epub.img_found_count.saturating_add(1);
+                    self.epub.img_cached_count = self.epub.img_cached_count.saturating_add(1);
                     return Ok(ScanResult::DecodedInline {
                         resume_offset: resume,
                     });
@@ -589,6 +609,8 @@ impl ReaderApp {
                     Err(e) => {
                         log::warn!("precache: extract failed: {}", e);
                         let _ = k.write_app_subdir(dir, img_file, &[]);
+                        self.epub.img_found_count = self.epub.img_found_count.saturating_add(1);
+                        self.epub.img_cached_count = self.epub.img_cached_count.saturating_add(1);
                         i = path_start + path_len;
                         continue;
                     }
@@ -604,6 +626,7 @@ impl ReaderApp {
                     max_h: self.text_area_h,
                 };
                 if work_queue::submit(self.epub.work_gen, task) {
+                    self.epub.img_found_count = self.epub.img_found_count.saturating_add(1);
                     return Ok(ScanResult::Dispatched {
                         resume_offset: resume,
                     });
@@ -682,6 +705,8 @@ impl ReaderApp {
             Some(_) => return Ok(None), // stale generation; discard
             None => return Ok(None),
         };
+
+        self.epub.img_cached_count = self.epub.img_cached_count.saturating_add(1);
 
         match result.outcome {
             work_queue::WorkOutcome::ImageReady { path_hash, image } => {

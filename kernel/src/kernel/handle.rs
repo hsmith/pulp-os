@@ -131,6 +131,44 @@ impl<'k> KernelHandle<'k> {
         storage::delete_in_pulp_subdir(&self.kernel.sd, dir, name)
     }
 
+    // _PULP/ direct file ops (v3 unified cache files)
+
+    #[inline]
+    pub fn read_cache_chunk(&mut self, name: &str, offset: u32, buf: &mut [u8]) -> Result<usize> {
+        storage::read_chunk_in_pulp(&self.kernel.sd, name, offset, buf)
+    }
+
+    #[inline]
+    pub fn write_cache(&mut self, name: &str, data: &[u8]) -> Result<()> {
+        storage::write_in_pulp(&self.kernel.sd, name, data)
+    }
+
+    #[inline]
+    pub fn append_cache(&mut self, name: &str, data: &[u8]) -> Result<()> {
+        storage::append_in_pulp(&self.kernel.sd, name, data)
+    }
+
+    #[inline]
+    pub fn write_cache_at(&mut self, name: &str, offset: u32, data: &[u8]) -> Result<()> {
+        storage::write_at_in_pulp(&self.kernel.sd, name, offset, data)
+    }
+
+    #[inline]
+    pub fn delete_cache(&mut self, name: &str) -> Result<()> {
+        storage::delete_in_pulp(&self.kernel.sd, name)
+    }
+
+    #[inline]
+    pub fn cache_file_size(&mut self, name: &str) -> Result<u32> {
+        storage::file_size_in_pulp(&self.kernel.sd, name)
+    }
+
+    // root directory file deletion
+    #[inline]
+    pub fn delete_file(&mut self, name: &str) -> Result<()> {
+        storage::delete_file(&self.kernel.sd, name)
+    }
+
     pub fn dir_page(&mut self, offset: usize, buf: &mut [DirEntry]) -> Result<DirPage> {
         let k = &mut *self.kernel;
         k.dir_cache.ensure_loaded(&k.sd)?;
@@ -156,6 +194,11 @@ impl<'k> KernelHandle<'k> {
     #[inline]
     pub fn sd_ok(&self) -> bool {
         self.kernel.sd_ok
+    }
+
+    pub fn ensure_dir_cache_loaded(&mut self) -> Result<()> {
+        let k = &mut *self.kernel;
+        k.dir_cache.ensure_loaded(&k.sd)
     }
 
     // direct cache accessors

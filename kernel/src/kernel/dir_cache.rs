@@ -3,7 +3,7 @@
 
 use crate::drivers::sdcard::SdStorage;
 use crate::drivers::storage::{
-    DirEntry, DirPage, PULP_DIR, TITLES_FILE, list_root_files, read_file_start_in_dir,
+    list_root_files, read_file_start_in_dir, DirEntry, DirPage, PULP_DIR, TITLES_FILE,
 };
 use crate::error::Result;
 
@@ -39,12 +39,15 @@ impl DirCache {
         self.count = count;
         sort_entries(&mut self.entries, self.count);
         self.load_titles(sd);
+        for i in 0..self.count {
+            self.entries[i].humanize_sfn();
+        }
         self.valid = true;
         Ok(())
     }
 
     fn load_titles(&mut self, sd: &SdStorage) {
-        let mut buf = [0u8; 2048];
+        let mut buf = [0u8; 4096];
         let n = match read_file_start_in_dir(sd, PULP_DIR, TITLES_FILE, &mut buf) {
             Ok((_, n)) => n,
             Err(_) => return,
@@ -106,7 +109,7 @@ impl DirCache {
     pub fn next_untitled_epub(&self, from: usize) -> Option<(usize, [u8; 13], u8)> {
         for i in from..self.count {
             let e = &self.entries[i];
-            if e.title_len > 0 || e.is_dir {
+            if e.has_real_title() || e.is_dir {
                 continue;
             }
             let name = e.name_str().as_bytes();
@@ -115,6 +118,26 @@ impl DirCache {
                 && name[name.len() - 4..].eq_ignore_ascii_case(b"EPUB")
             {
                 return Some((i, e.name, e.name_len));
+            }
+        }
+        None
+    }
+
+    // look up the display title for a filename (case-insensitive);
+    // returns (title_bytes, title_len) including humanized SFN
+    pub fn find_title(&self, filename: &[u8]) -> Option<(&[u8], u8)> {
+        let name = match core::str::from_utf8(filename) {
+            Ok(s) => s,
+            Err(_) => return None,
+        };
+        for i in 0..self.count {
+            let e = &self.entries[i];
+            if e.name_str().eq_ignore_ascii_case(name) {
+                let len = (e.title_len & 0x7F) as usize;
+                if len > 0 {
+                    return Some((&e.title[..len], len as u8));
+                }
+                return None;
             }
         }
         None
