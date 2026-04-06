@@ -16,12 +16,18 @@ use core::task::{Context, Poll, Waker};
 use embedded_hal::delay::DelayNs;
 
 use embedded_sdmmc::{
-    AsyncBlockDevice, AsyncVolumeManager, Block, BlockCount, BlockDevice, BlockIdx, RawDirectory,
-    RawVolume, SdCard, TimeSource, Timestamp, VolumeIdx,
+    AsyncBlockDevice, AsyncVolumeManager, Block, BlockCount, BlockDevice, BlockIdx,
+    RawDirectory, RawVolume, SdCard, TimeSource, Timestamp, VolumeIdx,
 };
 use log::info;
 
 use crate::board::SdSpiDevice;
+
+// constants //////////////////////////////////////////////////////////////////
+
+const MAX_DIRS: usize = 4;
+const MAX_FILES: usize = 4;
+const MAX_VOLUMES: usize = 1;
 
 // sync BlockDevice -> AsyncBlockDevice adapter
 //
@@ -76,7 +82,8 @@ impl TimeSource for NullTimeSource {
 
 pub type SyncSdCard = SdCard<SdSpiDevice, esp_hal::delay::Delay>;
 pub(crate) type SdBlockDev = BlockDeviceAdapter<SyncSdCard>;
-pub(crate) type VolMgr = AsyncVolumeManager<SdBlockDev, NullTimeSource, 4, 4, 1>;
+pub(crate) type VolMgr = AsyncVolumeManager<SdBlockDev, NullTimeSource, MAX_DIRS, MAX_FILES, MAX_VOLUMES>;
+pub(crate) type SdDirectory = RawDirectory;
 
 // persistent volume manager state, held behind RefCell for interior
 // mutability (AsyncVolumeManager requires &mut self)

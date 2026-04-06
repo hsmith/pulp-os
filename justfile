@@ -17,6 +17,9 @@ backup:
     mkdir -p .backups
     esptool --chip esp32c3 --port /dev/esp32 read_flash 0 0x400000 .backups/x4_factory_backup.bin
 
+build:
+    cargo build --release
+
 flash:
     cargo espflash flash --release --chip {{CHIP_TYPE}} --port {{DEV_MOUNT}}
 

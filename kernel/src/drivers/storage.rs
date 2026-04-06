@@ -11,19 +11,20 @@ use core::ops::ControlFlow;
 
 use embedded_sdmmc::Mode;
 
-use crate::drivers::sdcard::{SdStorage, SdStorageInner, poll_once};
+use crate::drivers::sdcard::{SdDirectory, SdStorage, SdStorageInner, poll_once};
 use crate::error::{Error, ErrorKind};
 
 pub const PULP_DIR: &str = "_PULP";
 pub const TITLES_FILE: &str = "TITLES.BIN";
 pub const TITLE_CAP: usize = 64;
+const SFN_CAP: usize = 13; // the maximum SFN (short file name) supported by FAT
 
 // backward-compatible alias
 pub type StorageError = Error;
 
 #[derive(Clone, Copy)]
 pub struct DirEntry {
-    pub name: [u8; 13],
+    pub name: [u8; SFN_CAP],
     pub name_len: u8,
     pub is_dir: bool,
     pub size: u32,
@@ -33,7 +34,7 @@ pub struct DirEntry {
 
 impl DirEntry {
     pub const EMPTY: Self = Self {
-        name: [0u8; 13],
+        name: [0u8; SFN_CAP],
         name_len: 0,
         is_dir: false,
         size: 0,
@@ -77,17 +78,15 @@ impl DirEntry {
         if !all_upper {
             return; // mixed case: user-supplied LFN, leave as-is
         }
+
+        //###hsmith $NOTE I'm a maniac and prefer all lower case
         let n = nlen.min(TITLE_CAP);
-        let dot_pos = src.iter().position(|&b| b == b'.').unwrap_or(n);
         for i in 0..n {
-            if i == 0 {
-                self.title[i] = src[i]; // keep first char uppercase
-            } else if i > dot_pos {
-                self.title[i] = src[i].to_ascii_lowercase(); // lowercase ext
-            } else {
-                self.title[i] = src[i].to_ascii_lowercase();
-            }
+            // Just lowercase everything for a clean, consistent look
+            self.title[i] = src[i].to_ascii_lowercase();
         }
+        
+        // Set the title_len with the 0x80 bit high to flag it as a "soft" title
         self.title_len = 0x80 | n as u8;
     }
 }
@@ -112,7 +111,7 @@ fn has_supported_ext(name: &[u8]) -> bool {
 
 // build "NAME.EXT" bytes from a ShortFileName
 
-fn sfn_to_bytes(name: &embedded_sdmmc::ShortFileName, out: &mut [u8; 13]) -> u8 {
+fn sfn_to_bytes(name: &embedded_sdmmc::ShortFileName, out: &mut [u8; SFN_CAP]) -> u8 {
     let base = name.base_name();
     let ext = name.extension();
     let mut pos = 0usize;
@@ -350,6 +349,73 @@ pub fn delete_file(sd: &SdStorage, name: &str) -> crate::error::Result<()> {
 
 // directory listing
 
+// ----------------------------------------------------------------------------
+
+async fn find_dir_by_path(inner: &mut SdStorageInner, path: &str) -> crate::error::Result<SdDirectory> {
+    let mut current_dir = inner.root;
+    for segment in path.split('/').filter(|s| !s.is_empty()) {
+        let next_dir = inner.mgr.open_dir(current_dir, segment).await
+            .map_err(|_| Error::new(ErrorKind::OpenDir, "find_dir_by_path failed to open dir"));
+        if current_dir != inner.root {
+            let _ = inner.mgr.close_dir(current_dir);
+        }
+        current_dir = next_dir?;
+    }
+
+    return Ok(current_dir);
+}
+
+// ----------------------------------------------------------------------------
+
+//###hsmith $TODO [T00002] support paging
+pub fn list_dir_contents(sd: &SdStorage, target_path: &str, buf: &mut [DirEntry]) -> crate::error::Result<usize> {
+    poll_once(async {
+        let mut guard = borrow(sd)?;
+        let inner = &mut *guard;
+
+        let target_dir = find_dir_by_path(inner, target_path).await?;
+
+        let mut count = 0usize;
+
+        inner.mgr.iterate_dir(target_dir, |entry| {
+            if count >= buf.len() {
+                return ControlFlow::Break(());
+            }
+            if entry.attributes.is_volume() {
+                return ControlFlow::Continue(());
+            }    
+            let mut name_buf = [0u8; SFN_CAP];
+            let name_len = sfn_to_bytes(&entry.name, &mut name_buf);
+            let sfn = &name_buf[..name_len as usize];
+            
+            if sfn.is_empty() || sfn[0] == b'.' || sfn[0] == b'_' {
+                return ControlFlow::Continue(());
+            }
+
+            let is_dir = entry.attributes.is_directory();
+            if !is_dir && !has_supported_ext(sfn) {
+                return ControlFlow::Continue(());
+            }
+
+            buf[count] = DirEntry {
+                name: name_buf,
+                name_len,
+                is_dir,
+                size: entry.size,
+                title: [0u8; TITLE_CAP],
+                title_len: 0,
+            };
+            
+            count += 1;
+            ControlFlow::Continue(())
+        }).await.map_err(|_| Error::new(ErrorKind::ReadFailed, "list_dir_contents failed"))?;
+
+        Ok(count)
+    })
+}
+
+// ----------------------------------------------------------------------------
+
 pub fn list_root_files(sd: &SdStorage, buf: &mut [DirEntry]) -> crate::error::Result<usize> {
     poll_once(async {
         let mut guard = borrow(sd)?;
@@ -365,7 +431,7 @@ pub fn list_root_files(sd: &SdStorage, buf: &mut [DirEntry]) -> crate::error::Re
                     return ControlFlow::Continue(());
                 }
 
-                let mut name_buf = [0u8; 13];
+                let mut name_buf = [0u8; SFN_CAP];
                 let name_len = sfn_to_bytes(&entry.name, &mut name_buf);
                 let sfn = &name_buf[..name_len as usize];
 
