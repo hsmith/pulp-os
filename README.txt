@@ -35,8 +35,11 @@ building
         cargo run --release
 
     local path dependencies (sibling dirs):
-      embedded-sdmmc    async FAT filesystem over SD/SPI (local fork)
+    NOTE: [hsmith] I added this to the nix flake instead, also I removed
+        the dependency on a sibling embedded-sdmmc since it appears to be
+        fetched directly from github in the Cargo file.
       smol-epub         no_std epub/zip/html/image processing
+    
 
 features
     txt reader      lazy page-indexed, read-ahead prefetch,

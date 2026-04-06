@@ -1,0 +1,44 @@
+{
+  "nodes": {
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1775002709,
+        "narHash": "sha256-d3Yx83vSrN+2z/loBh4mJpyRqr9aAJqlke4TkpFmRJA=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "bcd464ccd2a1a7cd09aa2f8d4ffba83b761b1d0e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-25.11",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "nixpkgs": "nixpkgs",
+        "smol-epub-src": "smol-epub-src"
+      }
+    },
+    "smol-epub-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1772781313,
+        "narHash": "sha256-eks6F5pu+HYdX5/66RvEiddZ4Yxf2gLdjHMuCmhAfxI=",
+        "owner": "hansmrtn",
+        "repo": "smol-epub",
+        "rev": "832609d967d4d06452dd49d35b2c9aeb578612de",
+        "type": "github"
+      },
+      "original": {
+        "owner": "hansmrtn",
+        "repo": "smol-epub",
+        "type": "github"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
